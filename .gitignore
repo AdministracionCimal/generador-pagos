@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.coverage
+htmlcov/
+
+# Entornos virtuales
+.venv/
+venv/
+
+# PyInstaller — binarios compilados, no el spec
+dist/
+build/
+
+# Tests cache
+.pytest_cache/
+
+# Herramientas / archivos generados
+graphify-out/
+.claude/
+
+# Logs de debug
+*.log
+

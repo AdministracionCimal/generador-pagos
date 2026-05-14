@@ -1,0 +1,200 @@
+{
+  "IdentificacionExterna": "PAGO - 13992",
+  "EmpresaCodigo": "EMPRE01",
+  "NumeroComprobante": "OP-0004-00021922",
+  "Proveedor": "30718308786",
+  "TransaccionTipoCodigo": "OPERTESORERIA",
+  "TransaccionSubtipoCodigo": "PAGO",
+  "Fecha": "2026-05-08",
+  "Nombre": "PAGO - 13992",
+  "DiferenciaCambio": 0,
+  "UsaCotizacionOrigen": 0,
+  "Descripcion": "",
+  "CajaCodigo": null,
+  "Banco": [
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 917918.65,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 917918.65,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17451,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-05-15",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189907",
+      "DimensionDistribucion": []
+    },
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 917918.65,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 917918.65,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17452,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-05-16",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189908",
+      "DimensionDistribucion": []
+    },
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 2002465.48,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 2002465.48,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17453,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-06-08",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189909",
+      "DimensionDistribucion": []
+    },
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 2002465.48,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 2002465.48,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17454,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-06-09",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189910",
+      "DimensionDistribucion": []
+    },
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 2002465.48,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 2002465.48,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17455,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-06-18",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189911",
+      "DimensionDistribucion": []
+    },
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 2002465.48,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 2002465.48,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17456,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-06-19",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189912",
+      "DimensionDistribucion": []
+    },
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 2002465.48,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 2002465.48,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17457,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-07-05",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189913",
+      "DimensionDistribucion": []
+    },
+    {
+      "OperacionBancariaCodigo": "EMCHPROP",
+      "CuentaCodigo": "02.01.04.01.0009",
+      "DebeHaber": -1,
+      "ImporteMonTransaccion": 2002465.52,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 2002465.52,
+      "Descripcion": null,
+      "DocumentoFisicoID": 17458,
+      "FechaDocumentoFisico": "2026-05-08",
+      "FechaVencimientoDocumentoFisico": "2026-07-06",
+      "ChequeraCodigo": "MACRO CPDProv 03",
+      "BancoCodigo": "00285",
+      "NumeroDocumentoFisico": "73189914",
+      "DimensionDistribucion": []
+    }
+  ],
+  "Efectivo": [],
+  "Otros": [],
+  "Retencion": [
+    {
+      "RetencionCodigo": "TRANSP-INSC",
+      "Importe": 24707.08,
+      "ISAR": 9950000.16,
+      "ISARAcumulado": 9950000.16,
+      "Fecha": "2026-05-08",
+      "NumeroRetencion": "0001652"
+    }
+  ],
+  "OperacionTesoreriaCotizaciones": [
+    {
+      "MonedaCodigo": "PES",
+      "Cotizacion": 1
+    },
+    {
+      "MonedaCodigo": "DOL",
+      "Cotizacion": 1388
+    }
+  ],
+  "CtaCte": [
+    {
+      "CuentaCodigo": "02.01.01.01.0001",
+      "DebeHaber": 1,
+      "ImporteMonTransaccion": 917918.65,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 917918.65,
+      "Descripcion": "F-0000-00010823",
+      "AplicacionOrigen": "MOVFONDOS - 10845",
+      "DimensionDistribucion": []
+    },
+    {
+      "CuentaCodigo": "02.01.01.01.0001",
+      "DebeHaber": 1,
+      "ImporteMonTransaccion": 917918.65,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 917918.65,
+      "Descripcion": "F-0000-00010824",
+      "AplicacionOrigen": "MOVFONDOS - 10846",
+      "DimensionDistribucion": []
+    },
+    {
+      "CuentaCodigo": "02.01.01.01.0001",
+      "DebeHaber": 1,
+      "ImporteMonTransaccion": 12039500,
+      "MonedaCodigo": "PES",
+      "ImporteMonPrincipal": 12039500,
+      "Descripcion": "A-0001-00000123",
+      "AplicacionOrigen": "FC - 21562",
+      "DimensionDistribucion": []
+    }
+  ],
+  "ImportacionEcheq": false,
+  "USR_ComboOC": null
+}

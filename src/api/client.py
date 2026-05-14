@@ -1,0 +1,239 @@
+import time
+from typing import Any
+
+import httpx
+
+from .endpoints import Endpoints
+
+
+class AuthError(Exception):
+    pass
+
+
+class ApiError(Exception):
+    def __init__(self, status: int, body: str) -> None:
+        super().__init__(f"HTTP {status}: {body}")
+        self.status = status
+        self.body = body
+
+
+class FinnegansClient:
+    def __init__(self, base_url: str, client_id: str, client_secret: str) -> None:
+        self.endpoints = Endpoints(base_url)
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token: str | None = None
+        self._token_expires_at: float = 0.0
+
+    # ── auth ──────────────────────────────────────────────────────────────
+
+    def _fetch_token(self) -> None:
+        resp = httpx.get(
+            self.endpoints.token(),
+            params={
+                "grant_type": "client_credentials",
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise AuthError(f"Token request failed {resp.status_code}: {resp.text}")
+        # Finnegans devuelve el token como texto plano (UUID), no como JSON
+        token = resp.text.strip()
+        if not token:
+            raise AuthError("Token vacío en la respuesta")
+        self._token = token
+        self._token_expires_at = time.time() + 3600 - 60
+
+    def _get_headers(self) -> dict:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+
+    # ── requests ──────────────────────────────────────────────────────────
+
+    def post(self, url: str, payload: dict) -> Any:
+        resp = httpx.post(url, json=payload, headers=self._get_headers(), timeout=30)
+        print(f"[DEBUG POST] status={resp.status_code} body={resp.text[:300]!r}")
+        if resp.status_code not in (200, 201):
+            raise ApiError(resp.status_code, resp.text[:500])
+        return self._parse_response(resp)
+
+    def get(self, url: str) -> Any:
+        resp = httpx.get(url, headers=self._get_headers(), timeout=15)
+        print(f"[DEBUG GET] status={resp.status_code} body={resp.text[:300]!r}")
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:500])
+        return self._parse_response(resp)
+
+    @staticmethod
+    def _parse_response(resp) -> Any:
+        import json
+        text = resp.text.strip().lstrip("﻿")
+        if not text:
+            return {}
+        try:
+            return json.loads(text)
+        except Exception:
+            return {"raw": text}
+
+    # ── domain helpers ────────────────────────────────────────────────────
+
+    def crear_op(self, payload: dict) -> dict:
+        return self.post(self.endpoints.operacion_tesoreria_save(), payload)
+
+    def get_organizacion(self, cuit: str) -> dict:
+        return self.get(self.endpoints.organizacion_get(cuit))
+
+    def get_proveedor(self, cuit: str) -> dict:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.proveedor(cuit, self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        return self._parse_response(resp)
+
+    def get_retencion(self, codigo: str) -> dict:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.retencion(codigo, self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        return self._parse_response(resp)
+
+    def get_composicion_saldo_proveedor(self, cuit: str, fecha: str) -> list[dict]:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(
+            self.endpoints.composicion_saldo_proveedor(cuit, fecha, self._token),
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
+    def get_aplicacion_factura_compra(self, comprobante: str) -> list[dict]:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(
+            self.endpoints.aplicacion_factura_compra(comprobante, self._token),
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
+    def get_factura_compra(self, documento: str) -> dict:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.factura_compra(documento, self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        return self._parse_response(resp)
+
+    def get_cotizacion_dolar(self, fecha: str) -> float:
+        """Devuelve la cotización DOL para la fecha dada (yyyy-MM-dd).
+        Si no hay dato (feriado/fin de semana), busca hasta 7 días atrás."""
+        from datetime import date, timedelta
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        fecha_dt = date.fromisoformat(fecha)
+        for dias_atras in range(8):
+            f = (fecha_dt - timedelta(days=dias_atras)).strftime("%Y-%m-%d")
+            url = self.endpoints.cotizacion(self._token, f)
+            resp = httpx.get(url, timeout=15)
+            if resp.status_code == 200:
+                data = self._parse_response(resp)
+                if isinstance(data, list) and data:
+                    return float(data[0].get("COTIZACION", 1))
+        return 1.0
+
+    def get_cuenta(self, codigo: str) -> dict:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.cuenta(codigo, self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        return self._parse_response(resp)
+
+    def get_talonario_list(self) -> list[dict]:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.talonario_list(self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
+    def get_talonario(self, codigo: str) -> dict:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.talonario(codigo, self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        return self._parse_response(resp)
+
+    def get_analisis_retencion(
+        self,
+        cuit: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+        empresa: str = "",
+        modo_emision: int = 2,
+    ) -> list[dict]:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        url = self.endpoints.analisis_retencion(
+            self._token, cuit, fecha_desde, fecha_hasta, empresa, modo_emision
+        )
+        # Loggear URL y respuesta para debug
+        import tempfile, pathlib
+        _log = pathlib.Path(tempfile.gettempdir()) / "generador_pagos_debug.log"
+        url_log = url.split("?")[0] + "?" + "&".join(
+            p for p in url.split("?")[1].split("&") if not p.startswith("ACCESS_TOKEN")
+        )
+        resp = httpx.get(url, timeout=20)
+        with open(_log, "a", encoding="utf-8") as _f:
+            _f.write(f"  [analisisRetencion] URL: {url_log}\n")
+            _f.write(f"  [analisisRetencion] status={resp.status_code} body={resp.text[:600]!r}\n")
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
+    def get_empresa_list(self) -> list[dict]:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.empresa_list(self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
+    def get_cuenta_list(self) -> list[dict]:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.cuenta_list(self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
+    def get_tipo_operacion_bancaria_list(self) -> list[dict]:
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.tipo_operacion_bancaria_list(self._token), timeout=15)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
+    def ping(self) -> bool:
+        try:
+            self._fetch_token()
+            return True
+        except Exception:
+            return False
