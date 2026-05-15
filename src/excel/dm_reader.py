@@ -114,7 +114,7 @@ def leer_dm(path: Path | str, hoja: str = HOJA_DM,
         "documento":  "Documento (ej. «FC - 21562»)",
         "proveedor":  "Proveedor",
         "importe":    "Importe",
-        "pago":       "Condición de pago (ej. «transferencia» o «Ch 08/05»)",
+        "pago":       "Pago",
     }
     faltantes = [label for key, label in _COLS_REQUERIDAS.items() if key not in cols]
     if faltantes:
