@@ -32,10 +32,6 @@ class Endpoints:
     def talonario_list(self, token: str) -> str:
         return f"{self.base}/Talonario/list?ACCESS_TOKEN={token}"
 
-    def talonario(self, codigo: str, token: str) -> str:
-        from urllib.parse import quote
-        return f"{self.base}/Talonario/{quote(codigo, safe='')}?ACCESS_TOKEN={token}"
-
     def tipo_operacion_bancaria_list(self, token: str) -> str:
         return f"{self.base}/tipoOperacionBancaria/list?ACCESS_TOKEN={token}"
 
@@ -89,4 +85,5 @@ class Endpoints:
             f"?ACCESS_TOKEN={token}"
             f"&PARAMWEBREPORT_fecha={fecha}"
             f"&PARAMWEBREPORT_organizacion={quote(cuit, safe='')}"
+            f"&PARAMWEBREPORT_cuenta=02.01.01.01.0001"
         )

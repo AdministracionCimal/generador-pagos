@@ -2,7 +2,6 @@ from decimal import Decimal
 
 from .models import ChequeEmitido, Modalidad, OpPago, ProveedorTanda
 
-EMPRESA_CODIGO = "EMPRE01"
 MONEDA_PES = "PES"
 
 
@@ -48,7 +47,7 @@ def armar_post(op: OpPago) -> dict:
 
     if p.modalidad == Modalidad.TRANSFERENCIA and not op.cheques:
         # Banco = neto (lo que realmente sale del banco = total - retenciones)
-        total_ret = Decimal(str(sum(r.get("Importe", 0) for r in op.retenciones)))
+        total_ret = sum((r.get("Importe") or Decimal("0")) for r in op.retenciones)
         total_neto = p.importe_total - total_ret
         banco = [{
             "OperacionBancariaCodigo": op.op_bancaria_transferencia_codigo,
@@ -71,7 +70,7 @@ def armar_post(op: OpPago) -> dict:
 
     return {
         "IdentificacionExterna": "",
-        "EmpresaCodigo": EMPRESA_CODIGO,
+        "EmpresaCodigo": op.empresa_codigo,
         "NumeroComprobante": "",
         "Proveedor": p.cuit,
         "TransaccionTipoCodigo": "OPERTESORERIA",
@@ -87,7 +86,11 @@ def armar_post(op: OpPago) -> dict:
         "Otros": [],
         "Retencion": [
             {
-                **{k: v for k, v in r.items() if not k.startswith("_")},
+                **{
+                    k: (float(v) if isinstance(v, Decimal) else v)
+                    for k, v in r.items()
+                    if not k.startswith("_")
+                },
                 "Fecha": _fmt_fecha(op.fecha),
             }
             for r in op.retenciones

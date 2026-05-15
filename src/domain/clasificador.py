@@ -29,7 +29,7 @@ def clasificar(proveedor: ProveedorTanda) -> ProveedorTanda:
         proveedor.modalidad = Modalidad.TRANSFERENCIA
     else:
         proveedor.modalidad = Modalidad.MANUAL
-        modalidades_distintas = {t for t in textos_l if t}
+        modalidades_distintas = sorted({t for t in textos_l if t})
         proveedor.motivo_manual = f"Modalidad mixta o no soportada: {modalidades_distintas}"
 
     return proveedor

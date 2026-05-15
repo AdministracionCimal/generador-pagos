@@ -1,9 +1,14 @@
 import time
+import logging
 from typing import Any
 
 import httpx
 
 from .endpoints import Endpoints
+from src.util.audit import record_http_exchange
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class AuthError(Exception):
@@ -54,15 +59,33 @@ class FinnegansClient:
     # ── requests ──────────────────────────────────────────────────────────
 
     def post(self, url: str, payload: dict) -> Any:
-        resp = httpx.post(url, json=payload, headers=self._get_headers(), timeout=30)
-        print(f"[DEBUG POST] status={resp.status_code} body={resp.text[:300]!r}")
+        try:
+            resp = httpx.post(url, json=payload, headers=self._get_headers(), timeout=30)
+        except Exception as exc:
+            record_http_exchange(
+                "ordenPago",
+                "POST",
+                url,
+                request_body=payload,
+                error=str(exc),
+            )
+            raise
+        record_http_exchange(
+            "ordenPago",
+            "POST",
+            url,
+            request_body=payload,
+            response_status=resp.status_code,
+            response_body=resp.text,
+        )
+        _LOG.debug("POST %s -> %s", url, resp.status_code)
         if resp.status_code not in (200, 201):
             raise ApiError(resp.status_code, resp.text[:500])
         return self._parse_response(resp)
 
     def get(self, url: str) -> Any:
         resp = httpx.get(url, headers=self._get_headers(), timeout=15)
-        print(f"[DEBUG GET] status={resp.status_code} body={resp.text[:300]!r}")
+        _LOG.debug("GET %s -> %s", url, resp.status_code)
         if resp.status_code != 200:
             raise ApiError(resp.status_code, resp.text[:500])
         return self._parse_response(resp)
@@ -189,16 +212,23 @@ class FinnegansClient:
         url = self.endpoints.analisis_retencion(
             self._token, cuit, fecha_desde, fecha_hasta, empresa, modo_emision
         )
-        # Loggear URL y respuesta para debug
-        import tempfile, pathlib
-        _log = pathlib.Path(tempfile.gettempdir()) / "generador_pagos_debug.log"
-        url_log = url.split("?")[0] + "?" + "&".join(
-            p for p in url.split("?")[1].split("&") if not p.startswith("ACCESS_TOKEN")
+        try:
+            resp = httpx.get(url, timeout=20)
+        except Exception as exc:
+            record_http_exchange(
+                "analisisRetencion",
+                "GET",
+                url,
+                error=str(exc),
+            )
+            raise
+        record_http_exchange(
+            "analisisRetencion",
+            "GET",
+            url,
+            response_status=resp.status_code,
+            response_body=resp.text,
         )
-        resp = httpx.get(url, timeout=20)
-        with open(_log, "a", encoding="utf-8") as _f:
-            _f.write(f"  [analisisRetencion] URL: {url_log}\n")
-            _f.write(f"  [analisisRetencion] status={resp.status_code} body={resp.text[:600]!r}\n")
         if resp.status_code != 200:
             raise ApiError(resp.status_code, resp.text[:200])
         data = self._parse_response(resp)

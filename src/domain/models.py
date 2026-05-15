@@ -45,12 +45,14 @@ class ChequeEmitido:
 class OpPago:
     proveedor: ProveedorTanda
     cheques: list[ChequeEmitido] = field(default_factory=list)
+    numero_comprobante_estimado: str = ""
     chequera_codigo: str = ""
     banco_codigo: str = ""
     cuenta_banco_codigo: str = ""
     cuenta_proveedor_codigo: str = "02.01.01.01.0001"
     op_bancaria_cheque_codigo: str = "EMCHPROP"
     op_bancaria_transferencia_codigo: str = "TLote"
+    empresa_codigo: str = "EMPRE01"
     cotizacion_dolar: Decimal = field(default_factory=lambda: Decimal("1"))
     retenciones: list[dict] = field(default_factory=list)
     fecha: date = field(default_factory=date.today)

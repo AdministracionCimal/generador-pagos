@@ -1,11 +1,15 @@
+import logging
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+_LOG = logging.getLogger(__name__)
+
+from PyQt6.QtCore import QRect, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
-    QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFrame,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMenuBar,
+    QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QFrame,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenuBar,
     QMessageBox, QProgressBar, QPushButton, QStatusBar, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -16,6 +20,7 @@ from src.domain.clasificador import clasificar
 from src.domain.fraccionador import fraccionar_proveedor
 from src.domain.mapper import armar_post
 from src.domain.models import Modalidad, OpPago, ProveedorTanda
+from src.domain.numeracion import secuencia_comprobantes
 from src.excel.dm_reader import leer_dm
 from src.ui import theme
 from src.ui.preview_dialog import PreviewDialog
@@ -28,19 +33,100 @@ def _hint(text: str) -> QLabel:
     return lbl
 
 
+def _fmt_money(value: Decimal | float | int) -> str:
+    return f"$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 _ESTADOS = {
     "LISTO":     ("Listo",           "success"),
     "MANUAL":    ("Carga manual",    "warning"),
     "EXCEDE":    ("Excede chequera", "danger"),
     "SIN_ITEMS": ("Sin ítems",       "danger"),
+    "YA_PAGADA": ("Sin saldo",       "neutral"),
 }
 
-_COLS = ["Proveedor", "CUIT", "Importe", "Modalidad", "Cheques", "Estado"]
+_COLS = ["", "Proveedor", "CUIT", "Importe", "Modalidad", "Cheques", "Estado"]
+
+
+def _draw_round_check(painter: QPainter, rect: QRect, state: Qt.CheckState) -> None:
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    circle = rect.adjusted(2, 2, -2, -2)
+    if state == Qt.CheckState.Checked:
+        painter.setPen(QPen(QColor(theme.BRAND_HOVER), 1.5))
+        painter.setBrush(QColor(theme.BRAND))
+        painter.drawEllipse(circle)
+        dot = circle.adjusted(5, 5, -5, -5)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(theme.BG_SURFACE))
+        painter.drawEllipse(dot)
+    else:
+        painter.setPen(QPen(QColor(theme.BRAND_HOVER if state == Qt.CheckState.PartiallyChecked else theme.TEXT_MUTED), 1.8))
+        painter.setBrush(QColor(theme.BRAND_SUBTLE if state == Qt.CheckState.PartiallyChecked else theme.BG_SURFACE))
+        painter.drawEllipse(circle)
+        if state == Qt.CheckState.PartiallyChecked:
+            line_y = circle.center().y()
+            painter.setPen(QPen(QColor(theme.BRAND_HOVER), 2.0))
+            painter.drawLine(circle.left() + 4, line_y, circle.right() - 4, line_y)
+    painter.restore()
+
+
+class _RoundCheckBox(QCheckBox):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setText("")
+        self.setTristate(False)
+        self.setFixedSize(20, 20)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        _draw_round_check(
+            painter,
+            self.rect().adjusted(1, 1, -1, -1),
+            Qt.CheckState.Checked if self.isChecked() else Qt.CheckState.Unchecked,
+        )
+
+
+class _CheckHeader(QHeaderView):
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, orientation, parent=None) -> None:
+        super().__init__(orientation, parent)
+        self._check_state = Qt.CheckState.Unchecked
+        self.setSectionsClickable(True)
+
+    def set_check_state(self, state: Qt.CheckState) -> None:
+        if self._check_state == state:
+            return
+        self._check_state = state
+        self.viewport().update()
+
+    def paintSection(self, painter, rect, logical_index) -> None:
+        super().paintSection(painter, rect, logical_index)
+        if logical_index != 0:
+            return
+        _draw_round_check(painter, self._checkbox_rect(rect), self._check_state)
+
+    def mousePressEvent(self, event) -> None:
+        index = self.logicalIndexAt(event.pos())
+        if index == 0:
+            checked = self._check_state != Qt.CheckState.Checked
+            self.toggled.emit(checked)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def _checkbox_rect(self, rect: QRect) -> QRect:
+        size = 20
+        x = rect.x() + (rect.width() - size) // 2
+        y = rect.y() + (rect.height() - size) // 2
+        return QRect(x, y, size, size)
 
 
 class _PrecargarWorker(QThread):
     progreso = pyqtSignal(str)
-    listo    = pyqtSignal(object, object, object, object, object)  # cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback
+    listo    = pyqtSignal(object, object, object, object, object, object)  # cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback, ultimo_op
     error    = pyqtSignal(str)
 
     def __init__(self, proveedores: list, cfg: dict) -> None:
@@ -61,6 +147,15 @@ class _PrecargarWorker(QThread):
         except Exception:
             cotizacion_dolar = Decimal("1")
             cotizacion_fallback = True
+
+        ultimo_op = ""
+        talonario_op = str(cfg.get("talonario_op_codigo", "TE-OP") or "").strip()
+        if talonario_op:
+            try:
+                detalle_op = client.get_talonario(talonario_op)
+                ultimo_op = str(detalle_op.get("NumeroActual", "") or "").strip()
+            except Exception:
+                ultimo_op = ""
 
         cache: dict = {}
         codigos_ret_cargados: dict = {}
@@ -110,7 +205,8 @@ class _PrecargarWorker(QThread):
                         for row in rows:
                             cod_tipo = row.get("RETENCIONTIPOCODIGO", "")
                             cod_esp  = row.get("RETENCIONCODIGO", "")
-                            nombre   = row.get("RETENCIONTIPO", cod_tipo or cod_esp).strip()
+                            nombre_tipo = str(row.get("RETENCIONTIPO", "") or "").strip()
+                            nombre_esp = str(row.get("RETENCION", "") or "").strip()
                             isar_inc = Decimal(str(row.get("ISAR", 0)))
                             imp_inc  = Decimal(str(row.get("IMPORTE", 0)))
                             for key in {k for k in (cod_tipo, cod_esp) if k}:
@@ -118,12 +214,20 @@ class _PrecargarWorker(QThread):
                                     historico[key] = {
                                         "isar_historico": Decimal("0"),
                                         "ya_retenido":    Decimal("0"),
-                                        "nombre":         nombre,
+                                        "nombre":         nombre_esp,
+                                        "nombre_tipo":    nombre_tipo,
                                     }
+                                if nombre_esp and not historico[key].get("nombre"):
+                                    historico[key]["nombre"] = nombre_esp
+                                if nombre_tipo and not historico[key].get("nombre_tipo"):
+                                    historico[key]["nombre_tipo"] = nombre_tipo
                                 historico[key]["isar_historico"] += isar_inc
                                 historico[key]["ya_retenido"]    += imp_inc
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _LOG.warning("analisisRetencion falló para %s: %s", p.cuit, exc)
+                        self.progreso.emit(
+                            f"⚠ {p.nombre}: no se pudo cargar histórico de retenciones ({exc})"
+                        )
 
                 cache[p.cuit] = (percepciones, maestros, historico)
 
@@ -143,8 +247,9 @@ class _PrecargarWorker(QThread):
                                 ratios_fc[doc] = gravado / total_fc
                         except Exception:
                             pass
-            except Exception:
-                pass
+            except Exception as exc:
+                _LOG.warning("Precarga falló para %s: %s", p.cuit, exc)
+                self.progreso.emit(f"⚠ {p.nombre}: error al precargar datos ({exc})")
 
         # Verificar saldos pendientes por proveedor (composicionSaldoProveedor)
         # Una llamada por CUIT en vez de una por comprobante.
@@ -153,7 +258,7 @@ class _PrecargarWorker(QThread):
         docs_pendientes: dict[str, set | None] = {}
         cuits_a_verificar = sorted({
             p.cuit for p in self._proveedores
-            if p.cuit and p.modalidad != Modalidad.MANUAL
+            if p.cuit
         })
         fecha_hoy = date.today().strftime("%Y-%m-%d")
         n_cuits = len(cuits_a_verificar)
@@ -170,7 +275,14 @@ class _PrecargarWorker(QThread):
             except Exception:
                 docs_pendientes[cuit] = None  # fail-open: incluir todos
 
-        self.listo.emit(cotizacion_dolar, cache, ratios_fc, docs_pendientes, cotizacion_fallback)
+        self.listo.emit(
+            cotizacion_dolar,
+            cache,
+            ratios_fc,
+            docs_pendientes,
+            cotizacion_fallback,
+            ultimo_op,
+        )
 
 
 class _ChiquerasLoader(QThread):
@@ -203,6 +315,45 @@ class _ChiquerasLoader(QThread):
             self.error.emit(str(e))
 
 
+class _SaldoCheckerWorker(QThread):
+    """
+    Worker liviano: solo consulta composicionSaldoProveedor por cada CUIT
+    y emite el dict docs_pendientes. Se lanza al cargar el Excel para que
+    los badges 'Sin saldo' aparezcan sin esperar a 'Procesar pagos'.
+    """
+    listo    = pyqtSignal(dict)   # docs_pendientes: {cuit: set | None}
+    progreso = pyqtSignal(str)
+
+    def __init__(self, proveedores: list, cfg: dict) -> None:
+        super().__init__()
+        self._proveedores = proveedores
+        self._cfg = cfg
+
+    def run(self) -> None:
+        try:
+            client = FinnegansClient(
+                self._cfg["base_url"], self._cfg["client_id"], self._cfg["client_secret"]
+            )
+            cuits = sorted({p.cuit for p in self._proveedores if p.cuit})
+            fecha_hoy = date.today().strftime("%Y-%m-%d")
+            docs_pendientes: dict = {}
+            for i, cuit in enumerate(cuits):
+                self.progreso.emit(f"Verificando saldo {i + 1}/{len(cuits)}: {cuit}")
+                try:
+                    rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
+                    docs_pendientes[cuit] = {
+                        r["IDENTIFICACIONEXTERNA"]
+                        for r in rows
+                        if r.get("IDENTIFICACIONEXTERNA")
+                        and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
+                    }
+                except Exception:
+                    docs_pendientes[cuit] = None  # fail-open
+            self.listo.emit(docs_pendientes)
+        except Exception:
+            self.listo.emit({})  # fail-open: no bloquear
+
+
 class _ProcesarWorker(QThread):
     progreso = pyqtSignal(int, str)       # (fila_tabla, mensaje)
     terminado = pyqtSignal(list)          # lista de resultados
@@ -219,12 +370,19 @@ class _ProcesarWorker(QThread):
             try:
                 payload = armar_post(op)
                 resp = self._client.crear_op(payload)
-                numero = resp.get("documento") or resp.get("NumeroComprobante") or resp.get("numeroComprobante") or "OK"
+                numero = (
+                    resp.get("NumeroComprobante")
+                    or resp.get("numeroComprobante")
+                    or resp.get("documento")
+                    or "OK"
+                )
                 self.progreso.emit(i, f"OK → {numero}")
                 resultados.append({
                     "nombre": nombre,
                     "estado": "OK",
                     "detalle": numero,
+                    "numero_previsto": op.numero_comprobante_estimado,
+                    "numero_real": numero,
                     "importe": float(op.proveedor.importe_total),
                 })
             except (ApiError, AuthError) as e:
@@ -233,6 +391,8 @@ class _ProcesarWorker(QThread):
                     "nombre": nombre,
                     "estado": "ERROR",
                     "detalle": str(e),
+                    "numero_previsto": op.numero_comprobante_estimado,
+                    "numero_real": "",
                     "importe": float(op.proveedor.importe_total),
                 })
             except Exception as e:
@@ -241,6 +401,8 @@ class _ProcesarWorker(QThread):
                     "nombre": nombre,
                     "estado": "ERROR",
                     "detalle": str(e),
+                    "numero_previsto": op.numero_comprobante_estimado,
+                    "numero_real": "",
                     "importe": float(op.proveedor.importe_total),
                 })
         self.terminado.emit(resultados)
@@ -257,6 +419,7 @@ class MainWindow(QMainWindow):
         self._ops_a_procesar: list[OpPago] = []
         self._worker: _ProcesarWorker | None = None
         self._precarga_worker: _PrecargarWorker | None = None
+        self._actualizando_tabla = False
         self._ultimo_cheque: int = 0
         self._build_ui()
         self._build_menu()
@@ -278,8 +441,8 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(28, 22, 28, 16)
-        root.setSpacing(16)
+        root.setContentsMargins(28, 16, 28, 16)
+        root.setSpacing(10)
 
         # — Header ——————————————————————————————————————————————————————
         header = QVBoxLayout(); header.setSpacing(2)
@@ -299,7 +462,7 @@ class MainWindow(QMainWindow):
 
         # — Card: chequera ———————————————————————————————————————————————
         saved_cod = self._cfg.get("chequera_codigo", "")
-        self._combo_cheq = QComboBox()
+        self._combo_cheq = theme.NoScrollComboBox()
         self._combo_cheq.setEditable(True)
         self._combo_cheq.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self._combo_cheq.setMinimumWidth(220)
@@ -327,24 +490,38 @@ class MainWindow(QMainWindow):
             w.textChanged.connect(self._actualizar_disponibles)
         root.addWidget(self._card_chequera())
 
+        self._summary_values: dict[str, QLabel] = {}
+        self._summary_hints: dict[str, QLabel] = {}
+        root.addWidget(self._build_resumen_operativo())
+
         # — Tabla ————————————————————————————————————————————————————————
         self._tabla = QTableWidget(0, len(_COLS))
+        self._tabla_header = _CheckHeader(Qt.Orientation.Horizontal, self._tabla)
+        self._tabla_header.toggled.connect(self._marcar_todos)
+        self._tabla.setHorizontalHeader(self._tabla_header)
         self._tabla.setHorizontalHeaderLabels(_COLS)
         self._tabla.setAlternatingRowColors(True)
         self._tabla.setShowGrid(False)
         self._tabla.verticalHeader().setVisible(False)
         self._tabla.verticalHeader().setDefaultSectionSize(42)
         hh = self._tabla.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c in range(1, len(_COLS)):
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for c in range(2, 5):
             hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        self._tabla.setColumnWidth(0, 52)
+        self._tabla.setColumnWidth(5, 72)
+        self._tabla.setColumnWidth(6, 110)
         self._tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._tabla.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._tabla.customContextMenuRequested.connect(self._on_tabla_context_menu)
         root.addWidget(self._tabla, stretch=1)
 
         # — Action bar ———————————————————————————————————————————————————
+        self._btn_eliminar = QPushButton("Eliminar seleccionados")
+        self._btn_eliminar.setEnabled(False)
+        self._btn_eliminar.clicked.connect(self._eliminar_seleccionados)
         self._btn_procesar = QPushButton("Procesar pagos")
         self._btn_procesar.setObjectName("Primary")
         self._btn_procesar.setEnabled(False)
@@ -358,6 +535,7 @@ class MainWindow(QMainWindow):
         self._lbl_progreso.setVisible(False)
 
         action_bar = QHBoxLayout(); action_bar.setSpacing(12)
+        action_bar.addWidget(self._btn_eliminar)
         action_bar.addWidget(self._lbl_progreso, stretch=1)
         action_bar.addWidget(self._progress)
         action_bar.addWidget(self._btn_procesar)
@@ -368,26 +546,66 @@ class MainWindow(QMainWindow):
         # Calcular disponibles con los valores iniciales del config
         self._actualizar_disponibles()
 
+    def _build_resumen_operativo(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("Card")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+
+        items = [
+            ("listos", "PAGOS LISTOS", "0"),
+            ("total", "TOTAL LISTO", _fmt_money(0)),
+            ("cheques", "CHEQUES PREVISTOS", "0"),
+            ("manuales", "CARGA MANUAL", "0"),
+            ("disponibles", "DISPONIBLES", "—"),
+        ]
+
+        for index, (key, label, value) in enumerate(items):
+            cell = QWidget()
+            col = QVBoxLayout(cell)
+            col.setContentsMargins(20, 13, 20, 13)
+            col.setSpacing(3)
+
+            hint = QLabel(label)
+            hint.setObjectName("KpiLabel")
+
+            number = QLabel(value)
+            number.setStyleSheet(
+                f"color: {theme.TEXT_PRIMARY}; font-size: 18px; font-weight: 700;"
+            )
+
+            col.addWidget(hint)
+            col.addWidget(number)
+            row.addWidget(cell, stretch=1)
+            self._summary_hints[key] = hint
+            self._summary_values[key] = number
+
+            if index < len(items) - 1:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.Shape.VLine)
+                sep.setStyleSheet(
+                    f"color: {theme.BORDER}; background: {theme.BORDER};"
+                    f"max-width: 1px; margin: 12px 0;"
+                )
+                row.addWidget(sep)
+
+        return card
+
     def _card_archivo(self, btn_cargar: QPushButton) -> QFrame:
         card = QFrame(); card.setObjectName("Card")
-        v = QVBoxLayout(card); v.setContentsMargins(18, 14, 18, 14); v.setSpacing(8)
-        t = QLabel("Planilla autorizada"); t.setObjectName("CardTitle")
-        v.addWidget(t)
-        row = QHBoxLayout(); row.setSpacing(12)
+        row = QHBoxLayout(card); row.setContentsMargins(16, 10, 16, 10); row.setSpacing(14)
+        lbl_t = QLabel("PLANILLA AUTORIZADA"); lbl_t.setObjectName("CardHint")
+        row.addWidget(lbl_t)
         row.addWidget(self._lbl_archivo, stretch=1)
         row.addWidget(btn_cargar)
-        v.addLayout(row)
         return card
 
     def _card_chequera(self) -> QFrame:
         card = QFrame(); card.setObjectName("Card")
-        v = QVBoxLayout(card); v.setContentsMargins(18, 14, 18, 14); v.setSpacing(10)
-        t = QLabel("Chequera"); t.setObjectName("CardTitle")
-        v.addWidget(t)
+        row = QHBoxLayout(card); row.setContentsMargins(16, 8, 16, 8); row.setSpacing(14)
 
-        row = QHBoxLayout(); row.setSpacing(14)
-
-        col_cod = QVBoxLayout(); col_cod.setSpacing(4)
+        col_cod = QVBoxLayout(); col_cod.setSpacing(3)
         col_cod.addWidget(_hint("CHEQUERA"))
         cheq_row = QHBoxLayout(); cheq_row.setSpacing(8)
         cheq_row.addWidget(self._combo_cheq, stretch=1)
@@ -397,17 +615,82 @@ class MainWindow(QMainWindow):
 
         for label_text, widget in [("ÚLTIMO Nº", self._inp_cheq_ultimo),
                                     ("LÍMITE",    self._inp_cheq_limite)]:
-            col = QVBoxLayout(); col.setSpacing(4)
+            col = QVBoxLayout(); col.setSpacing(3)
             col.addWidget(_hint(label_text)); col.addWidget(widget)
             row.addLayout(col, stretch=1)
 
-        col_disp = QVBoxLayout(); col_disp.setSpacing(4)
+        col_disp = QVBoxLayout(); col_disp.setSpacing(3)
         col_disp.addWidget(_hint("DISPONIBLES")); col_disp.addWidget(self._lbl_disponibles)
         row.addLayout(col_disp)
-        v.addLayout(row)
         return card
 
     # ── acciones ──────────────────────────────────────────────────────────
+
+    def _iniciar_saldo_checker(self) -> None:
+        """
+        Lanza _SaldoCheckerWorker con un mini diálogo modal bloqueante.
+        El usuario no puede pulsar 'Procesar pagos' hasta que termine la consulta.
+        """
+        if hasattr(self, "_saldo_checker") and self._saldo_checker.isRunning():
+            self._saldo_checker.quit()
+            self._saldo_checker.wait(5000)  # máx 5 s; evita freeze si la API no responde
+
+        # ── Mini diálogo de carga ──────────────────────────────────────────
+        self._saldo_dlg = QDialog(self)
+        self._saldo_dlg.setWindowTitle("Verificando saldos")
+        self._saldo_dlg.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+        )
+        self._saldo_dlg.setMinimumWidth(380)
+        v = QVBoxLayout(self._saldo_dlg)
+        v.setContentsMargins(22, 18, 22, 18)
+        v.setSpacing(10)
+        lbl_titulo = QLabel("Consultando saldos en Finnegans…")
+        lbl_titulo.setObjectName("CardTitle")
+        v.addWidget(lbl_titulo)
+        self._saldo_dlg_msg = QLabel("Iniciando…")
+        self._saldo_dlg_msg.setObjectName("Muted")
+        v.addWidget(self._saldo_dlg_msg)
+        pb = QProgressBar()
+        pb.setRange(0, 0)        # indeterminado (spinner)
+        pb.setTextVisible(False)
+        pb.setFixedHeight(6)
+        v.addWidget(pb)
+
+        self._saldo_checker = _SaldoCheckerWorker(list(self._proveedores), self._cfg)
+        self._saldo_checker.progreso.connect(self._saldo_dlg_msg.setText)
+        self._saldo_checker.listo.connect(self._on_saldo_checker_listo)
+        self._saldo_checker.start()
+        self._saldo_dlg.exec()   # bloquea UI en loop propio hasta accept()
+
+    def _on_saldo_checker_listo(self, docs_pendientes: dict) -> None:
+        # Cerrar el diálogo de carga
+        if hasattr(self, "_saldo_dlg") and self._saldo_dlg.isVisible():
+            self._saldo_dlg.accept()
+
+        # Auto-eliminar proveedores cuyos ítems ya no tienen saldo pendiente
+        removidos: list[str] = []
+        nuevos: list = []
+        for p in self._proveedores:
+            if (p.cuit
+                    and docs_pendientes.get(p.cuit) is not None
+                    and p.items
+                    and all(i.documento not in docs_pendientes[p.cuit] for i in p.items)):
+                removidos.append(p.nombre)
+            else:
+                nuevos.append(p)
+
+        if removidos:
+            self._proveedores = nuevos
+            self._poblar_tabla()
+            self.statusBar().showMessage(
+                f"Eliminados {len(removidos)} sin saldo pendiente: {', '.join(removidos)}.",
+                7000,
+            )
+        else:
+            self.statusBar().showMessage("Saldos verificados — todos con saldo pendiente.", 3000)
 
     def _cargar_chequeras(self, silent: bool = False) -> None:
         if not config.is_configured(self._cfg):
@@ -499,6 +782,8 @@ class MainWindow(QMainWindow):
             self._lbl_archivo.style().polish(self._lbl_archivo)
             self._poblar_tabla()
             self._guardar_datos_chequera()
+            if config.is_configured(self._cfg):
+                self._iniciar_saldo_checker()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo leer el Excel:\n{e}")
 
@@ -519,28 +804,83 @@ class MainWindow(QMainWindow):
             estado = self._calcular_estado(p, n_cheques, ultimo, limite, cheques_usados - n_cheques)
             filas.append((p, n_cheques, estado))
 
+        self._actualizando_tabla = True
         self._tabla.setRowCount(len(filas))
         self._ops_a_procesar = []
 
         for row, (p, n_cheques, estado) in enumerate(filas):
-            self._tabla.setItem(row, 0, QTableWidgetItem(p.nombre))
-            self._tabla.setItem(row, 1, QTableWidgetItem(p.cuit or "—"))
-            importe_fmt = f"$ {float(p.importe_total):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            chk = _RoundCheckBox()
+            chk.toggled.connect(self._on_checkbox_toggled)
+            chk_wrap = QWidget()
+            chk_wrap.setMinimumSize(20, 20)
+            chk_layout = QHBoxLayout(chk_wrap)
+            chk_layout.setContentsMargins(0, 0, 0, 0)
+            chk_layout.setSpacing(0)
+            chk_layout.addWidget(chk, alignment=Qt.AlignmentFlag.AlignCenter)
+            self._tabla.setCellWidget(row, 0, chk_wrap)
+
+            self._tabla.setItem(row, 1, QTableWidgetItem(p.nombre))
+            self._tabla.setItem(row, 2, QTableWidgetItem(p.cuit or "—"))
+            importe_fmt = _fmt_money(p.importe_total)
             item_imp = QTableWidgetItem(importe_fmt)
             item_imp.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._tabla.setItem(row, 2, item_imp)
-            self._tabla.setItem(row, 3, QTableWidgetItem(p.modalidad.name.replace("_", " ").title()))
+            self._tabla.setItem(row, 3, item_imp)
+            self._tabla.setItem(row, 4, QTableWidgetItem(p.modalidad.name.replace("_", " ").title()))
             item_ch = QTableWidgetItem(str(n_cheques) if n_cheques else "—")
             item_ch.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._tabla.setItem(row, 4, item_ch)
+            self._tabla.setItem(row, 5, item_ch)
             label, variant = _ESTADOS[estado]
-            self._tabla.setCellWidget(row, 5, theme.make_badge(label, variant))
+            self._tabla.setCellWidget(row, 6, theme.make_badge(label, variant))
+
+        self._actualizando_tabla = False
 
         listos = sum(1 for _, _, e in filas if e == "LISTO")
+        self._actualizar_resumen_operativo(filas)
         self._btn_procesar.setEnabled(listos > 0)
+        self._actualizar_btn_eliminar()
+        self._actualizar_checkbox_header()
         self.statusBar().showMessage(
             f"{len(self._proveedores)} proveedores cargados. {listos} listos para procesar."
         )
+
+    def _actualizar_resumen_operativo(self, filas: list[tuple]) -> None:
+        if not hasattr(self, "_summary_values"):
+            return
+
+        listos = [(p, n) for p, n, estado in filas if estado == "LISTO"]
+        manuales = sum(1 for _, _, estado in filas if estado == "MANUAL")
+        total_listo = sum((p.importe_total for p, _ in listos), Decimal("0"))
+        cheques_previstos = sum(n for _, n in listos)
+
+        ultimo = self._numero_desde()
+        limite = self._limite()
+        disponibles = limite - ultimo if ultimo is not None and limite is not None else None
+
+        values = {
+            "listos": str(len(listos)),
+            "total": _fmt_money(total_listo),
+            "cheques": str(cheques_previstos),
+            "manuales": str(manuales),
+            "disponibles": str(disponibles) if disponibles is not None else "—",
+        }
+        colors = {
+            "listos": theme.SUCCESS if listos else theme.TEXT_PRIMARY,
+            "total": theme.TEXT_PRIMARY,
+            "cheques": theme.TEXT_PRIMARY,
+            "manuales": theme.WARNING if manuales else theme.TEXT_PRIMARY,
+            "disponibles": (
+                theme.SUCCESS if disponibles is not None and disponibles >= cheques_previstos
+                else theme.DANGER if disponibles is not None
+                else theme.TEXT_PRIMARY
+            ),
+        }
+
+        for key, value in values.items():
+            label = self._summary_values[key]
+            label.setText(value)
+            label.setStyleSheet(
+                f"color: {colors[key]}; font-size: 18px; font-weight: 700;"
+            )
 
     def _calcular_estado(self, p, n_cheques, ultimo, limite, cheques_ya_usados):
         if not p.items:
@@ -629,7 +969,15 @@ class MainWindow(QMainWindow):
         self._btn_procesar.setEnabled(True)
         QMessageBox.critical(self, "Error", f"Error al consultar proveedores:\n{msg}")
 
-    def _on_precarga_lista(self, cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback) -> None:
+    def _on_precarga_lista(
+        self,
+        cotizacion_dolar,
+        ret_cache,
+        ratios_fc,
+        docs_pendientes,
+        cotizacion_fallback,
+        ultimo_op,
+    ) -> None:
         self._progress.setRange(0, 100)
         self._progress.setVisible(False)
         self._lbl_progreso.setVisible(False)
@@ -651,9 +999,11 @@ class MainWindow(QMainWindow):
                 return
 
         self._construir_ops(self._ultimo_cheque, cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes)
+        self._actualizar_estados_post_precarga(docs_pendientes)
 
         # Si hubo overflow, ofrecer chequera alternativa antes de continuar
         self._manejar_overflow(cotizacion_dolar, ret_cache, ratios_fc)
+        self._asignar_numeros_op(ultimo_op)
 
         if getattr(self, "_ops_advertencias", []):
             cuerpo = "\n".join(self._ops_advertencias)
@@ -689,15 +1039,68 @@ class MainWindow(QMainWindow):
         self._worker.terminado.connect(self._on_terminado)
         self._worker.start()
 
-    def _on_tabla_context_menu(self, pos) -> None:
-        row = self._tabla.rowAt(pos.y())
-        if row < 0 or row >= len(self._proveedores):
+    def _on_checkbox_toggled(self, _checked: bool) -> None:
+        if self._actualizando_tabla:
             return
-        menu = QMenu(self)
-        act_del = menu.addAction("Eliminar de la lista")
-        if menu.exec(self._tabla.viewport().mapToGlobal(pos)) == act_del:
-            self._proveedores.pop(row)
-            self._poblar_tabla()
+        self._actualizar_btn_eliminar()
+        self._actualizar_checkbox_header()
+
+    def _checkbox_en_fila(self, row: int) -> _RoundCheckBox | None:
+        wrapper = self._tabla.cellWidget(row, 0)
+        if wrapper is None:
+            return None
+        return wrapper.findChild(_RoundCheckBox)
+
+    def _filas_marcadas(self) -> list[int]:
+        filas = []
+        for row in range(self._tabla.rowCount()):
+            chk = self._checkbox_en_fila(row)
+            if chk and chk.isChecked():
+                filas.append(row)
+        return filas
+
+    def _actualizar_btn_eliminar(self) -> None:
+        self._btn_eliminar.setEnabled(bool(self._filas_marcadas()))
+
+    def _actualizar_checkbox_header(self) -> None:
+        total = self._tabla.rowCount()
+        marcadas = len(self._filas_marcadas())
+        if total == 0 or marcadas == 0:
+            state = Qt.CheckState.Unchecked
+        elif marcadas == total:
+            state = Qt.CheckState.Checked
+        else:
+            state = Qt.CheckState.PartiallyChecked
+        self._tabla_header.set_check_state(state)
+
+    def _marcar_todos(self, checked: bool) -> None:
+        self._actualizando_tabla = True
+        for row in range(self._tabla.rowCount()):
+            chk = self._checkbox_en_fila(row)
+            if chk is not None:
+                chk.setChecked(checked)
+        self._actualizando_tabla = False
+        self._actualizar_btn_eliminar()
+        self._actualizar_checkbox_header()
+
+    def _eliminar_seleccionados(self) -> None:
+        filas = self._filas_marcadas()
+        if not filas:
+            return
+        if len(filas) > 1:
+            reply = QMessageBox.question(
+                self,
+                "Eliminar pagos",
+                f"Se van a eliminar {len(filas)} pagos de la lista.\n\n¿Querés continuar?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for row in reversed(filas):
+            if 0 <= row < len(self._proveedores):
+                self._proveedores.pop(row)
+        self._poblar_tabla()
 
     def _construir_ops(self, ultimo: int, cotizacion_dolar: "Decimal | None" = None,
                        ret_cache: dict | None = None,
@@ -785,11 +1188,27 @@ class MainWindow(QMainWindow):
                 cuenta_banco_codigo=cuenta_banco,
                 op_bancaria_cheque_codigo=op_cheque,
                 op_bancaria_transferencia_codigo=op_transf,
+                empresa_codigo=self._cfg.get("empresa_codigo", "EMPRE01"),
                 cotizacion_dolar=cotizacion_dolar,
                 retenciones=retenciones_post,
                 fecha=date.today(),
             )
             self._ops_a_procesar.append(op)
+
+    def _asignar_numeros_op(self, ultimo_op: str) -> None:
+        ultimo_op = str(ultimo_op or "").strip()
+        if not ultimo_op or not self._ops_a_procesar:
+            return
+        try:
+            numeros = secuencia_comprobantes(ultimo_op, len(self._ops_a_procesar))
+        except ValueError:
+            self.statusBar().showMessage(
+                f"No se pudo interpretar el último número de OP: {ultimo_op}",
+                5000,
+            )
+            return
+        for op, numero in zip(self._ops_a_procesar, numeros):
+            op.numero_comprobante_estimado = numero
 
     def _manejar_overflow(self, cotizacion_dolar, ret_cache: dict, ratios_fc: dict) -> None:
         """
@@ -826,7 +1245,7 @@ class MainWindow(QMainWindow):
         lbl_sel = QLabel("Asignar a otra chequera:")
         v.addWidget(lbl_sel)
 
-        combo_alt = QComboBox()
+        combo_alt = theme.NoScrollComboBox()
         current_cod = self._combo_cheq.currentData() or self._combo_cheq.currentText().strip()
         for i in range(self._combo_cheq.count()):
             cod = self._combo_cheq.itemData(i)
@@ -912,10 +1331,33 @@ class MainWindow(QMainWindow):
                 banco_codigo=banco_codigo,
                 cuenta_banco_codigo=cuenta_banco,
                 op_bancaria_cheque_codigo=op_cheque_cod,
+                empresa_codigo=self._cfg.get("empresa_codigo", "EMPRE01"),
                 cotizacion_dolar=cotizacion_dolar,
                 retenciones=retenciones_post,
                 fecha=date.today(),
             ))
+
+    def _actualizar_estados_post_precarga(self, docs_pendientes: dict) -> None:
+        """
+        Tras la precarga, recorre la tabla y marca como 'Sin saldo' los proveedores
+        cuyos ítems ya no tienen balance pendiente en Finnegans.
+        Aplica también a proveedores MANUAL (incluidos en la consulta de saldo).
+        """
+        for row in range(self._tabla.rowCount()):
+            item_cuit = self._tabla.item(row, 2)
+            if item_cuit is None:
+                continue
+            cuit = item_cuit.text().strip()
+            prov = next((p for p in self._proveedores if p.cuit == cuit), None)
+            if prov is None or not prov.cuit:
+                continue
+            pendientes = docs_pendientes.get(prov.cuit)
+            if pendientes is None:
+                continue  # fail-open: no cambiar estado
+            sin_saldo = [i for i in prov.items if i.documento not in pendientes]
+            if sin_saldo and len(sin_saldo) == len(prov.items):
+                label, variant = _ESTADOS["YA_PAGADA"]
+                self._tabla.setCellWidget(row, 6, theme.make_badge(label, variant))
 
     def _on_progreso(self, fila: int, msg: str) -> None:
         total = len(self._ops_a_procesar)
@@ -942,6 +1384,8 @@ class MainWindow(QMainWindow):
 
         manuales = [{"nombre": p.nombre, "estado": "MANUAL",
                      "detalle": p.motivo_manual or "Modalidad no soportada",
+                     "numero_previsto": "",
+                     "numero_real": "",
                      "importe": float(p.importe_total)}
                     for p in self._proveedores if p.modalidad == Modalidad.MANUAL]
         dlg = ResultDialog(resultados + manuales, self)

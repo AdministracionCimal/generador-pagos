@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 # ── Icon paths ────────────────────────────────────────────────────────────
 _ICONS_DIR     = Path(__file__).parent / "icons"
@@ -12,32 +12,32 @@ _BRANCH_CLOSED = f"image: url({_ICO_CH_RIGHT});" if (_ICONS_DIR / "chevron_right
 _BRANCH_OPEN   = f"image: url({_ICO_CH_DOWN});"  if (_ICONS_DIR / "chevron_down.svg").exists()  else "image: none;"
 
 # ── Paleta ────────────────────────────────────────────────────────────────
-BG_APP        = "#F8FAFC"
-BG_SURFACE    = "#FEFEFE"
-BG_SUBTLE     = "#F1F5F9"
-BG_HOVER      = "#EFF6FF"
-BORDER        = "#E2E8F0"
-BORDER_STRONG = "#CBD5E1"
+BG_APP        = "#F5F7FA"
+BG_SURFACE    = "#FDFEFE"
+BG_SUBTLE     = "#F0F3F7"
+BG_HOVER      = "#EAF2FF"
+BORDER        = "#DDE4EC"
+BORDER_STRONG = "#B8C4D2"
 
-TEXT_PRIMARY   = "#0F172A"
-TEXT_SECONDARY = "#475569"
-TEXT_MUTED     = "#94A3B8"
+TEXT_PRIMARY   = "#111827"
+TEXT_SECONDARY = "#4B5563"
+TEXT_MUTED     = "#8793A3"
 
-BRAND          = "#2563EB"
-BRAND_LIGHT    = "#3B82F6"
-BRAND_HOVER    = "#1D4ED8"
-BRAND_PRESSED  = "#1E40AF"
-BRAND_DISABLED = "#93C5FD"
-BRAND_SUBTLE   = "#EFF6FF"
+BRAND          = "#1F5FBF"
+BRAND_LIGHT    = "#2F6FD4"
+BRAND_HOVER    = "#1A4FA3"
+BRAND_PRESSED  = "#153F82"
+BRAND_DISABLED = "#9BBBEA"
+BRAND_SUBTLE   = "#EAF2FF"
 
-SUCCESS    = "#15803D"
-SUCCESS_BG = "#DCFCE7"
-WARNING    = "#B45309"
-WARNING_BG = "#FEF3C7"
-DANGER     = "#B91C1C"
-DANGER_BG  = "#FEE2E2"
-INFO       = "#1D4ED8"
-INFO_BG    = "#DBEAFE"
+SUCCESS    = "#187044"
+SUCCESS_BG = "#E2F6EA"
+WARNING    = "#9A5B00"
+WARNING_BG = "#FFF4D9"
+DANGER     = "#A83131"
+DANGER_BG  = "#FCE7E7"
+INFO       = "#1F5FBF"
+INFO_BG    = "#EAF2FF"
 
 FONT_FAMILY = "'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif"
 
@@ -69,34 +69,33 @@ QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 6px; }}
 QFrame#Card {{
     background-color: {BG_SURFACE};
     border: 1px solid {BORDER};
-    border-bottom: 2px solid {BORDER_STRONG};
-    border-radius: 12px;
+    border-radius: 8px;
 }}
 
 QLabel {{ color: {TEXT_PRIMARY}; font-size: 13px; }}
 QLabel#PageTitle    {{ color: {TEXT_PRIMARY};   font-size: 22px; font-weight: 700;
-                       letter-spacing: -0.3px; }}
+                       letter-spacing: 0; }}
 QLabel#PageSubtitle {{ color: {TEXT_SECONDARY}; font-size: 13px; }}
 QLabel#CardTitle    {{ color: {TEXT_PRIMARY};   font-size: 13px; font-weight: 600; }}
 QLabel#CardHint     {{ color: {TEXT_MUTED};     font-size: 10px; font-weight: 600;
-                       letter-spacing: 0.6px; }}
+                       letter-spacing: 0; }}
 QLabel#Muted        {{ color: {TEXT_MUTED};     font-size: 13px; }}
 QLabel#Filename     {{ color: {TEXT_PRIMARY};   font-size: 13px; font-weight: 500; }}
-QLabel#KpiNumber    {{ color: {TEXT_PRIMARY};   font-size: 30px; font-weight: 700;
-                       letter-spacing: -0.5px; line-height: 1; }}
+QLabel#KpiNumber    {{ color: {TEXT_PRIMARY};   font-size: 26px; font-weight: 700;
+                       letter-spacing: 0; line-height: 1; }}
 QLabel#KpiLabel     {{ color: {TEXT_MUTED};     font-size: 10px; font-weight: 600;
-                       letter-spacing: 0.8px; }}
+                       letter-spacing: 0; }}
 
 QComboBox {{
     background-color: {BG_SURFACE};
     border: 1px solid {BORDER_STRONG};
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 7px 10px;
     color: {TEXT_PRIMARY};
-    min-height: 20px;
+    min-height: 22px;
     selection-background-color: {BRAND};
 }}
-QComboBox:hover   {{ border-color: #9CA3AF; }}
+QComboBox:hover   {{ border-color: {TEXT_MUTED}; }}
 QComboBox:focus   {{ border: 2px solid {BRAND}; padding: 5px 9px; }}
 QComboBox:disabled {{ background-color: {BG_SUBTLE}; color: {TEXT_MUTED}; border-color: {BORDER}; }}
 QComboBox::drop-down {{
@@ -106,12 +105,10 @@ QComboBox::drop-down {{
     subcontrol-position: top right;
 }}
 QComboBox::down-arrow {{
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid {TEXT_SECONDARY};
-    width: 0; height: 0;
-    margin-right: 8px;
+    image: url({_ICO_CH_DOWN});
+    width: 12px;
+    height: 8px;
+    margin-right: 6px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {BG_SURFACE};
@@ -137,38 +134,35 @@ QLineEdit {{
     background-color: {BG_SURFACE};
     border: 1px solid {BORDER_STRONG};
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 7px 10px;
     color: {TEXT_PRIMARY};
     selection-background-color: {BRAND};
-    selection-color: white;
-    min-height: 20px;
+    selection-color: {BG_SURFACE};
+    min-height: 22px;
 }}
-QLineEdit:hover    {{ border-color: #9CA3AF; }}
+QLineEdit:hover    {{ border-color: {TEXT_MUTED}; }}
 QLineEdit:focus    {{ border: 2px solid {BRAND}; padding: 5px 9px; }}
 QLineEdit:disabled {{ background-color: {BG_SUBTLE}; color: {TEXT_MUTED};
                       border-color: {BORDER}; }}
 
 QPushButton {{
-    background: qlineargradient(y1:0, y2:1, stop:0 {BG_SURFACE}, stop:1 {BG_SUBTLE});
+    background: {BG_SURFACE};
     border: 1px solid {BORDER_STRONG};
-    border-bottom: 1px solid #B8C4D0;
     border-radius: 6px;
     color: {TEXT_PRIMARY};
-    padding: 7px 16px;
+    padding: 8px 16px;
     font-size: 13px;
     font-weight: 500;
-    min-height: 20px;
+    min-height: 22px;
 }}
 QPushButton:hover {{
-    background: qlineargradient(y1:0, y2:1, stop:0 {BG_SUBTLE}, stop:1 #E2E8F0);
-    border-color: #9CA3AF;
-    border-bottom-color: #8A95A3;
+    background: {BG_SUBTLE};
+    border-color: {TEXT_MUTED};
 }}
 QPushButton:pressed {{
-    background: qlineargradient(y1:0, y2:1, stop:0 #E2E8F0, stop:1 {BG_SUBTLE});
-    border-color: #9CA3AF;
-    padding-top: 8px;
-    padding-bottom: 6px;
+    background: {BORDER};
+    border-color: {BORDER_STRONG};
+    padding: 8px 16px;
 }}
 QPushButton:disabled {{
     color: {TEXT_MUTED};
@@ -178,49 +172,46 @@ QPushButton:disabled {{
 QPushButton:focus {{ outline: none; }}
 
 QPushButton#Primary {{
-    background: qlineargradient(y1:0, y2:1, stop:0 {BRAND_LIGHT}, stop:1 {BRAND});
-    color: white;
-    border: 1px solid {BRAND_HOVER};
-    border-bottom: 2px solid {BRAND_PRESSED};
+    background: {BRAND};
+    color: {BG_SURFACE};
+    border: 1px solid {BRAND};
     font-weight: 600;
 }}
 QPushButton#Primary:hover {{
-    background: qlineargradient(y1:0, y2:1, stop:0 #60A5FA, stop:1 {BRAND_LIGHT});
+    background: {BRAND_HOVER};
     border-color: {BRAND_HOVER};
-    border-bottom-color: {BRAND_PRESSED};
 }}
 QPushButton#Primary:pressed {{
-    background: qlineargradient(y1:0, y2:1, stop:0 {BRAND}, stop:1 {BRAND_HOVER});
-    border-bottom: 1px solid {BRAND_PRESSED};
-    padding-top: 8px;
-    padding-bottom: 6px;
+    background: {BRAND_PRESSED};
+    border-color: {BRAND_PRESSED};
+    padding: 8px 16px;
 }}
 QPushButton#Primary:disabled {{
-    background: qlineargradient(y1:0, y2:1, stop:0 {BRAND_DISABLED}, stop:1 #60A5FA);
+    background: {BRAND_DISABLED};
     border: 1px solid {BRAND_DISABLED};
-    color: white;
+    color: {BG_SURFACE};
 }}
 
 QTableWidget {{
     background-color: {BG_SURFACE};
     border: 1px solid {BORDER};
-    border-radius: 12px;
+    border-radius: 8px;
     gridline-color: transparent;
-    alternate-background-color: #FAFBFC;
+    alternate-background-color: #F7F9FC;
     selection-background-color: {BG_HOVER};
     selection-color: {TEXT_PRIMARY};
     color: {TEXT_PRIMARY};
     font-size: 13px;
     outline: none;
 }}
-QTableWidget::item        {{ padding: 8px 12px; border: none; }}
+QTableWidget::item        {{ padding: 7px 12px; border: none; }}
 QTableWidget::item:hover  {{ background-color: {BG_SUBTLE}; }}
 QTableWidget::item:selected {{ background-color: {BG_HOVER}; color: {TEXT_PRIMARY}; }}
 
 QTreeWidget {{
     background-color: {BG_SURFACE};
     border: 1px solid {BORDER};
-    border-radius: 12px;
+    border-radius: 8px;
     alternate-background-color: {BG_SUBTLE};
     selection-background-color: {BG_HOVER};
     selection-color: {TEXT_PRIMARY};
@@ -248,17 +239,17 @@ QTreeWidget::branch:open:has-children:has-siblings {{
 }}
 
 QHeaderView::section {{
-    background-color: {BG_SURFACE};
-    color: {TEXT_MUTED};
-    padding: 10px 12px;
+    background-color: {BG_SUBTLE};
+    color: {TEXT_SECONDARY};
+    padding: 9px 12px;
     border: none;
     border-bottom: 1px solid {BORDER};
     font-weight: 600;
     font-size: 11px;
-    letter-spacing: 0.4px;
+    letter-spacing: 0;
 }}
 QTableCornerButton::section {{
-    background-color: {BG_SURFACE};
+    background-color: {BG_SUBTLE};
     border: none;
     border-bottom: 1px solid {BORDER};
 }}
@@ -272,7 +263,7 @@ QProgressBar {{
     max-height: 6px;
 }}
 QProgressBar::chunk {{
-    background: qlineargradient(x1:0, x2:1, stop:0 {BRAND_LIGHT}, stop:1 {BRAND});
+    background: {BRAND};
     border-radius: 3px;
 }}
 
@@ -287,7 +278,7 @@ QStatusBar::item {{ border: none; }}
 
 QGroupBox {{
     border: 1px solid {BORDER};
-    border-radius: 10px;
+    border-radius: 8px;
     margin-top: 18px;
     padding: 16px 14px 14px;
     background-color: {BG_SURFACE};
@@ -299,10 +290,11 @@ QGroupBox::title {{
     subcontrol-position: top left;
     left: 14px;
     padding: 0 6px;
+    background-color: {BG_APP};
     color: {TEXT_MUTED};
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.7px;
+    letter-spacing: 0;
 }}
 
 QScrollBar:vertical   {{ background: transparent; width: 8px; margin: 2px; }}
@@ -322,7 +314,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: 
 
 QToolTip {{
     background-color: {TEXT_PRIMARY};
-    color: white;
+    color: {BG_SURFACE};
     border: none;
     border-radius: 6px;
     padding: 6px 10px;
@@ -375,6 +367,14 @@ def show_animated(dialog, duration: int = 160) -> None:
     dialog._show_anim = anim   # prevent GC
 
 
+# ── Widgets ───────────────────────────────────────────────────────────────
+
+class NoScrollComboBox(QComboBox):
+    """QComboBox que ignora el scroll del mouse para evitar cambios accidentales."""
+    def wheelEvent(self, event):          # noqa: N802
+        event.ignore()
+
+
 # ── Badges ────────────────────────────────────────────────────────────────
 _BADGE_VARIANTS = {
     "success": (SUCCESS, SUCCESS_BG),
@@ -390,8 +390,9 @@ def badge_qss(variant: str) -> str:
     return (
         f"background-color: {bg};"
         f"color: {fg};"
-        f"border-radius: 10px;"
-        f"padding: 3px 12px;"
+        f"border: 1px solid {BORDER};"
+        f"border-radius: 6px;"
+        f"padding: 3px 10px;"
         f"font-size: 11px;"
         f"font-weight: 600;"
     )
@@ -401,7 +402,7 @@ def make_badge(text: str, variant: str = "neutral") -> QWidget:
     """Pill widget centrado, listo para setCellWidget o layouts."""
     container = QWidget()
     layout = QHBoxLayout(container)
-    layout.setContentsMargins(8, 4, 8, 4)
+    layout.setContentsMargins(6, 4, 6, 4)
     layout.setSpacing(0)
     label = QLabel(text)
     label.setStyleSheet(badge_qss(variant))

@@ -84,25 +84,37 @@ def calcular_retenciones(
         if not codigo or codigo not in ret_maestros:
             continue
 
+        maestro         = ret_maestros[codigo]
         hist            = historico.get(codigo, {})
         isar_historico  = Decimal(str(hist.get("isar_historico", 0)))
         ya_retenido     = Decimal(str(hist.get("ya_retenido",    0)))
-        nombre_tipo     = hist.get("nombre", codigo)
+        nombre_tipo     = str(hist.get("nombre_tipo") or "").strip()
+        if not nombre_tipo and str(maestro.get("RetencionTipoCodigo") or "").strip() == "GAN_RET":
+            nombre_tipo = "Retención de Ganancias"
+        nombre_esp = (
+            str(hist.get("nombre") or "").strip()
+            or str(maestro.get("Nombre") or "").strip()
+            or str(maestro.get("Descripcion") or "").strip()
+            or codigo
+        )
 
         isar_acumulado  = isar_historico + base_imponible
-        retencion_bruta = calcular_importe_retencion(ret_maestros[codigo], isar_acumulado)
+        retencion_bruta = calcular_importe_retencion(maestro, isar_acumulado)
         importe         = max(Decimal("0"), retencion_bruta - ya_retenido)
 
         if importe > Decimal("0"):
             retenciones_post.append({
                 "RetencionCodigo": codigo,
-                "Importe":         float(importe),
-                "ISAR":            float(base_imponible),   # base imponible de esta OP
-                "ISARAcumulado":   float(isar_acumulado),   # histórico del mes + esta OP
+                "Importe":         importe,          # Decimal; mapper convierte a float al serializar
+                "ISAR":            base_imponible,   # base imponible de esta OP
+                "ISARAcumulado":   isar_acumulado,   # histórico del mes + esta OP
                 # Campos extra para el preview (no van al POST de Finnegans)
-                "_nombre":         nombre_tipo,
-                "_isar_historico": float(isar_historico),
-                "_ya_retenido":    float(ya_retenido),
+                "_nombre":         nombre_esp,
+                "_nombre_tipo":    nombre_tipo,
+                "_codigo":         codigo,
+                "_isar_historico": isar_historico,
+                "_isar_acumulado": isar_acumulado,
+                "_ya_retenido":    ya_retenido,
             })
             total_ret += importe
 

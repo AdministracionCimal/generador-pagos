@@ -22,6 +22,7 @@ _DEFAULTS: dict = {
     "cuenta_banco_transferencia_codigo": "01.01.01.02.0006",
     "cuenta_banco_transferencia_nombre": "01.01.01.02.0006",
     "banco_codigo": "00285",
+    "talonario_op_codigo": "TE-OP",
     "op_bancaria_cheque_codigo": "EMCHPROP",
     "op_bancaria_cheque_nombre": "Emisión de cheque propio",
     "op_bancaria_transferencia_codigo": "TLote",

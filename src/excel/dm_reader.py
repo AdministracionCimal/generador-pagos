@@ -94,7 +94,7 @@ def _es_fila_amarilla(row) -> bool:
 
 def leer_dm(path: Path | str, hoja: str = HOJA_DM,
             solo_amarillas: bool = True) -> list[ProveedorTanda]:
-    # read_only=False para poder leer estilos de celda (fill color)
+    # data_only=True para leer valores calculados; read_only por defecto False (necesario para leer estilos de celda)
     wb = load_workbook(str(path), data_only=True)
     if hoja not in wb.sheetnames:
         hojas_disp = ", ".join(wb.sheetnames)
@@ -108,6 +108,20 @@ def leer_dm(path: Path | str, hoja: str = HOJA_DM,
     rows = ws.iter_rows()
     header_row = next(rows)
     cols = _detectar_columnas(header_row)
+
+    _COLS_REQUERIDAS = {
+        "documento":  "Documento (ej. «FC - 21562»)",
+        "proveedor":  "Proveedor",
+        "importe":    "Importe",
+        "pago":       "Condición de pago (ej. «transferencia» o «Ch 08/05»)",
+    }
+    faltantes = [label for key, label in _COLS_REQUERIDAS.items() if key not in cols]
+    if faltantes:
+        wb.close()
+        raise ValueError(
+            f"Faltan columnas requeridas en la hoja «{hoja}»:\n"
+            + "\n".join(f"  • {f}" for f in faltantes)
+        )
 
     proveedores: dict[str, ProveedorTanda] = {}
 

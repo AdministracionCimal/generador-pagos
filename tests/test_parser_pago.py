@@ -39,6 +39,12 @@ class TestEsCheque:
     def test_ch_solo(self):
         assert es_cheque("Ch 15/05")
 
+    def test_ch_sin_espacio(self):
+        assert es_cheque("ch08/05")
+
+    def test_ch_sin_espacio_mayuscula(self):
+        assert es_cheque("Ch08/05 - 10/05")
+
     def test_no_es_cheque_transferencia(self):
         assert not es_cheque("transferencia")
 

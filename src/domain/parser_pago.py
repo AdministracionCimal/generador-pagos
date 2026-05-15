@@ -41,7 +41,7 @@ def parsear_fechas_col_l(
 
 def es_cheque(texto: str) -> bool:
     t = (texto or "").strip().lower()
-    return "ch " in t or t.startswith("ch\t") or re.match(r"ch\s+\d", t) is not None
+    return bool(re.search(r"\bch\s*\d", t))
 
 
 def es_transferencia(texto: str) -> bool:

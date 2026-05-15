@@ -1,7 +1,8 @@
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox, QCompleter, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QVBoxLayout,
+    QComboBox, QCompleter, QDialog, QDialogButtonBox, QFormLayout, QFrame,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QProgressBar, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 import src.config as config
@@ -52,32 +53,99 @@ class _SettingsLoader(QThread):
             self.terminado.emit()
 
 
+class _TestConnectionWorker(QThread):
+    """Prueba la autenticación con Finnegans (GET /oauth/token)."""
+    resultado = pyqtSignal(bool, str)   # (ok, mensaje)
+
+    def __init__(self, base_url, client_id, secret):
+        super().__init__()
+        self._url    = base_url
+        self._id     = client_id
+        self._secret = secret
+
+    def run(self):
+        try:
+            from src.api.client import FinnegansClient
+            c = FinnegansClient(self._url, self._id, self._secret)
+            c._fetch_token()
+            self.resultado.emit(True, "Conexión exitosa")
+        except Exception as e:
+            msg = str(e)
+            if len(msg) > 90:
+                msg = msg[:87] + "…"
+            self.resultado.emit(False, msg)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, cfg: dict, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Configuración")
-        self.setMinimumWidth(620)
+        self.setMinimumWidth(640)
+        self.resize(640, 700)
         self._cfg    = cfg
         self._loader = None
+        self._tester = None
 
         primera_vez = not config.is_configured(cfg)
 
         # ── Encabezado ───────────────────────────────────────────────────
-        title    = QLabel("Configuración"); title.setObjectName("PageTitle")
+        title    = QLabel("Configuración")
+        title.setObjectName("PageTitle")
         subtitle = QLabel(
             "Credenciales de la API Finnegans y cuentas por defecto. "
             "Se guardan cifradas en este equipo."
         )
-        subtitle.setObjectName("PageSubtitle"); subtitle.setWordWrap(True)
+        subtitle.setObjectName("PageSubtitle")
+        subtitle.setWordWrap(True)
+
+        # ── Acción global ────────────────────────────────────────────────
+        self._btn_cargar = QPushButton("Cargar desde API")
+        self._btn_cargar.setToolTip(
+            "Conecta con Finnegans y rellena los combos de empresa, "
+            "cuentas y operaciones bancarias."
+        )
+        self._btn_cargar.clicked.connect(self._cargar_manual)
+
+        action_bar = QHBoxLayout()
+        action_bar.addStretch()
+        action_bar.addWidget(self._btn_cargar)
+
+        # ── Progress ─────────────────────────────────────────────────────
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)
+        self._progress.setTextVisible(False)
+        self._progress.setFixedHeight(4)
+        self._progress.setVisible(False)
+
+        self._lbl_cargando = QLabel("Cargando información desde Finnegans…")
+        self._lbl_cargando.setObjectName("Muted")
+        self._lbl_cargando.setVisible(False)
 
         # ── Campos ───────────────────────────────────────────────────────
         _DEFAULT_URL = "https://api.finneg.com/api"
-        self._base_url      = QLineEdit(cfg.get("base_url") or _DEFAULT_URL)
+        self._base_url = QLineEdit(cfg.get("base_url") or _DEFAULT_URL)
         self._base_url.setPlaceholderText(_DEFAULT_URL)
-        self._client_id     = QLineEdit(cfg.get("client_id", ""))
+        self._base_url.setToolTip("URL base de la API Finnegans (ej. https://api.finneg.com/api)")
+
+        self._client_id = QLineEdit(cfg.get("client_id", ""))
+        self._client_id.setToolTip("ID de aplicación registrada en Finnegans.")
+
         self._client_secret = QLineEdit(cfg.get("client_secret", ""))
         self._client_secret.setEchoMode(QLineEdit.EchoMode.Password)
-        self._banco_codigo  = QLineEdit(cfg.get("banco_codigo", "00285"))
+        self._client_secret.setToolTip(
+            "Contraseña de la aplicación. No se muestra y se guarda cifrada con Fernet."
+        )
+
+        self._banco_codigo = QLineEdit(cfg.get("banco_codigo", "00285"))
+        self._banco_codigo.setToolTip("Código interno del banco en Finnegans (ej. 00285)")
+        self._banco_codigo.setMaximumWidth(120)
+
+        self._talonario_op_codigo = QLineEdit(cfg.get("talonario_op_codigo", "TE-OP"))
+        self._talonario_op_codigo.setPlaceholderText("TE-OP")
+        self._talonario_op_codigo.setMaximumWidth(160)
+        self._talonario_op_codigo.setToolTip(
+            "Código del talonario para Órdenes de Pago en Finnegans (ej. TE-OP)"
+        )
 
         # — Empresa ——————————————————————————————————————————————————————
         self._combo_empresa = self._make_combo()
@@ -86,7 +154,7 @@ class SettingsDialog(QDialog):
         _saved_emp_nom = cfg.get("empresa_nombre", _saved_emp_cod)
         self._combo_empresa.addItem(_saved_emp_nom, _saved_emp_cod)
 
-        # — Cuentas bancarias ————————————————————————————————————————————
+        # — Cuentas contables ────────────────────────────────────────────
         self._combo_cuenta_cheque = self._make_combo()
         self._combo_cuenta_transf = self._make_combo()
         for combo in (self._combo_cuenta_cheque, self._combo_cuenta_transf):
@@ -100,7 +168,7 @@ class SettingsDialog(QDialog):
         _saved_tr_nom = cfg.get("cuenta_banco_transferencia_nombre", _saved_tr_cod)
         self._combo_cuenta_transf.addItem(_saved_tr_nom, _saved_tr_cod)
 
-        # — Operaciones bancarias ————————————————————————————————————————
+        # — Operaciones bancarias ────────────────────────────────────────
         self._combo_cheque = self._make_combo()
         self._combo_transf = self._make_combo()
         self._combo_cheque.addItem(
@@ -111,60 +179,100 @@ class SettingsDialog(QDialog):
             cfg.get("op_bancaria_transferencia_nombre", "Transferencia por Lote"),
             cfg.get("op_bancaria_transferencia_codigo", "TLote"),
         )
-
-        btn_cargar = QPushButton("Cargar desde API")
-        btn_cargar.clicked.connect(self._cargar_manual)
-
-        def _col(label_text, combo):
-            col = QVBoxLayout(); col.setSpacing(4)
-            lbl = QLabel(label_text); lbl.setObjectName("CardHint")
-            col.addWidget(lbl); col.addWidget(combo)
-            return col
-
-        combo_row = QHBoxLayout(); combo_row.setSpacing(12)
-        combo_row.addLayout(_col("CHEQUES PROPIOS", self._combo_cheque))
-        combo_row.addLayout(_col("TRANSFERENCIAS",  self._combo_transf))
-        combo_row.addWidget(btn_cargar)
-        combo_row.setAlignment(btn_cargar, Qt.AlignmentFlag.AlignBottom)
-
-        self._lbl_ops_estado = QLabel(""); self._lbl_ops_estado.setObjectName("Muted")
-
-        # ── Progress ─────────────────────────────────────────────────────
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 0)
-        self._progress.setTextVisible(False)
-        self._progress.setFixedHeight(4)
-        self._progress.setVisible(False)
-
-        self._lbl_cargando = QLabel("Cargando información desde Finnegans…")
-        self._lbl_cargando.setObjectName("Muted")
-        self._lbl_cargando.setVisible(False)
+        self._lbl_ops_estado = QLabel("")
+        self._lbl_ops_estado.setObjectName("Muted")
 
         # ── Sección CONEXIÓN ──────────────────────────────────────────────
         grp_cred = QGroupBox("CONEXIÓN")
-        form_cred = QFormLayout(grp_cred)
-        form_cred.setHorizontalSpacing(18); form_cred.setVerticalSpacing(10)
+        vbox_cred = QVBoxLayout(grp_cred)
+        vbox_cred.setSpacing(10)
+
+        form_cred = QFormLayout()
+        form_cred.setHorizontalSpacing(18)
+        form_cred.setVerticalSpacing(10)
         form_cred.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form_cred.addRow("URL base Finnegans", self._base_url)
         form_cred.addRow("Client ID",          self._client_id)
         form_cred.addRow("Client Secret",      self._client_secret)
+        vbox_cred.addLayout(form_cred)
 
-        # ── Sección CUENTAS BANCARIAS ─────────────────────────────────────
-        grp_banco = QGroupBox("CUENTAS BANCARIAS")
-        form_banco = QFormLayout(grp_banco)
-        form_banco.setHorizontalSpacing(18); form_banco.setVerticalSpacing(10)
-        form_banco.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        form_banco.addRow("Empresa",                      self._combo_empresa)
-        form_banco.addRow("Cuenta cheques propios",       self._combo_cuenta_cheque)
-        form_banco.addRow("Cuenta transferencias",        self._combo_cuenta_transf)
-        form_banco.addRow("Código de banco",              self._banco_codigo)
+        self._btn_probar = QPushButton("Probar conexión")
+        self._btn_probar.setFixedWidth(148)
+        self._btn_probar.setToolTip("Verifica las credenciales contra la API Finnegans.")
+        self._btn_probar.clicked.connect(self._probar_conexion)
+        self._lbl_test = QLabel("")
+        self._lbl_test.setObjectName("Muted")
 
-        # ── Sección OPERACIONES ───────────────────────────────────────────
+        test_row = QHBoxLayout()
+        test_row.setSpacing(12)
+        test_row.addWidget(self._btn_probar)
+        test_row.addWidget(self._lbl_test)
+        test_row.addStretch()
+        vbox_cred.addLayout(test_row)
+
+        # ── Sección EMPRESA Y BANCO ───────────────────────────────────────
+        grp_empresa = QGroupBox("EMPRESA Y BANCO")
+        form_empresa = QFormLayout(grp_empresa)
+        form_empresa.setHorizontalSpacing(18)
+        form_empresa.setVerticalSpacing(10)
+        form_empresa.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_empresa.addRow("Empresa",       self._combo_empresa)
+        form_empresa.addRow("Código banco",  self._banco_codigo)
+
+        # ── Sección TALONARIOS ────────────────────────────────────────────
+        grp_talonarios = QGroupBox("TALONARIOS")
+        form_tal = QFormLayout(grp_talonarios)
+        form_tal.setHorizontalSpacing(18)
+        form_tal.setVerticalSpacing(10)
+        form_tal.addRow("Talonario orden de pago", self._talonario_op_codigo)
+
+        # ── Sección CUENTAS CONTABLES ─────────────────────────────────────
+        grp_cuentas = QGroupBox("CUENTAS CONTABLES")
+        form_cuentas = QFormLayout(grp_cuentas)
+        form_cuentas.setHorizontalSpacing(18)
+        form_cuentas.setVerticalSpacing(10)
+        form_cuentas.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_cuentas.addRow("Cheques propios",  self._combo_cuenta_cheque)
+        form_cuentas.addRow("Transferencias",   self._combo_cuenta_transf)
+
+        # ── Sección OPERACIONES BANCARIAS ─────────────────────────────────
         grp_ops = QGroupBox("OPERACIONES BANCARIAS")
-        form_ops = QFormLayout(grp_ops)
-        form_ops.setHorizontalSpacing(18); form_ops.setVerticalSpacing(10)
-        form_ops.addRow("", combo_row)
-        form_ops.addRow("", self._lbl_ops_estado)
+        vbox_ops = QVBoxLayout(grp_ops)
+        vbox_ops.setSpacing(10)
+
+        def _col(label_text, combo):
+            col = QVBoxLayout()
+            col.setSpacing(4)
+            lbl = QLabel(label_text)
+            lbl.setObjectName("CardHint")
+            col.addWidget(lbl)
+            col.addWidget(combo)
+            return col
+
+        combo_row = QHBoxLayout()
+        combo_row.setSpacing(16)
+        combo_row.addLayout(_col("CHEQUES PROPIOS", self._combo_cheque))
+        combo_row.addLayout(_col("TRANSFERENCIAS",  self._combo_transf))
+        combo_row.addStretch()
+        vbox_ops.addLayout(combo_row)
+        vbox_ops.addWidget(self._lbl_ops_estado)
+
+        # ── Scroll area con las secciones ─────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content.setStyleSheet(f"background-color: {theme.BG_APP};")
+        sections = QVBoxLayout(content)
+        sections.setContentsMargins(0, 0, 6, 0)
+        sections.setSpacing(8)
+        sections.addWidget(grp_cred)
+        sections.addWidget(grp_empresa)
+        sections.addWidget(grp_talonarios)
+        sections.addWidget(grp_cuentas)
+        sections.addWidget(grp_ops)
+        sections.addStretch()
+        scroll.setWidget(content)
 
         # ── Botones ───────────────────────────────────────────────────────
         buttons = QDialogButtonBox(
@@ -176,23 +284,22 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
 
-        # ── Layout ────────────────────────────────────────────────────────
+        # ── Layout raíz ──────────────────────────────────────────────────
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 18); layout.setSpacing(10)
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(10)
         layout.addWidget(title)
         layout.addWidget(subtitle)
 
         if primera_vez:
-            banner = self._make_banner(
+            layout.addWidget(self._make_banner(
                 "Primera vez: completá las credenciales y guardá para empezar."
-            )
-            layout.addWidget(banner)
+            ))
 
+        layout.addLayout(action_bar)
         layout.addWidget(self._progress)
         layout.addWidget(self._lbl_cargando)
-        layout.addWidget(grp_cred)
-        layout.addWidget(grp_banco)
-        layout.addWidget(grp_ops)
+        layout.addWidget(scroll, stretch=1)
         layout.addSpacing(4)
         layout.addWidget(buttons)
 
@@ -202,15 +309,14 @@ class SettingsDialog(QDialog):
     # ── Helpers ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def _make_banner(text: str):
-        """Info banner — full border, no side-stripe."""
-        from PyQt6.QtWidgets import QFrame, QHBoxLayout
+    def _make_banner(text: str) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
             f"QFrame {{ background-color: {theme.INFO_BG}; border: 1px solid #BFDBFE;"
             f" border-radius: 8px; }}"
         )
-        h = QHBoxLayout(frame); h.setContentsMargins(14, 10, 14, 10)
+        h = QHBoxLayout(frame)
+        h.setContentsMargins(14, 10, 14, 10)
         lbl = QLabel(text)
         lbl.setStyleSheet(
             f"color: {theme.INFO}; font-size: 13px; background: transparent; border: none;"
@@ -219,8 +325,8 @@ class SettingsDialog(QDialog):
         h.addWidget(lbl)
         return frame
 
-    def _make_combo(self) -> QComboBox:
-        combo = QComboBox()
+    def _make_combo(self) -> theme.NoScrollComboBox:
+        combo = theme.NoScrollComboBox()
         combo.setMinimumWidth(260)
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -230,6 +336,34 @@ class SettingsDialog(QDialog):
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         combo.setCompleter(completer)
         return combo
+
+    # ── Probar conexión ───────────────────────────────────────────────────
+
+    def _probar_conexion(self) -> None:
+        url = self._base_url.text().strip()
+        if url and not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        cid    = self._client_id.text().strip()
+        secret = self._client_secret.text().strip()
+        if not (url and cid and secret):
+            self._lbl_test.setText("Completá URL, Client ID y Client Secret.")
+            self._lbl_test.setStyleSheet(f"color: {theme.DANGER};")
+            return
+        self._btn_probar.setEnabled(False)
+        self._lbl_test.setText("Probando…")
+        self._lbl_test.setStyleSheet(f"color: {theme.TEXT_MUTED};")
+        self._tester = _TestConnectionWorker(url, cid, secret)
+        self._tester.resultado.connect(self._on_test_resultado)
+        self._tester.start()
+
+    def _on_test_resultado(self, ok: bool, msg: str) -> None:
+        self._btn_probar.setEnabled(True)
+        if ok:
+            self._lbl_test.setText(f"✓  {msg}")
+            self._lbl_test.setStyleSheet(f"color: {theme.SUCCESS}; font-weight: 600;")
+        else:
+            self._lbl_test.setText(f"✗  {msg}")
+            self._lbl_test.setStyleSheet(f"color: {theme.DANGER};")
 
     # ── Carga en background ───────────────────────────────────────────────
 
@@ -247,8 +381,7 @@ class SettingsDialog(QDialog):
         secret = self._cfg.get("client_secret", "")
         if not (url and cid and secret):
             return
-        self._progress.setVisible(True)
-        self._lbl_cargando.setVisible(True)
+        self._set_loading(True)
         self._loader = self._make_loader(url, cid, secret)
         self._loader.start()
 
@@ -261,17 +394,22 @@ class SettingsDialog(QDialog):
         if not (url and cid and secret):
             self._lbl_ops_estado.setText("Completá URL, Client ID y Client Secret primero.")
             return
-        self._progress.setVisible(True)
-        self._lbl_cargando.setVisible(True)
+        self._set_loading(True)
         self._loader = self._make_loader(url, cid, secret)
         self._loader.start()
+
+    def _set_loading(self, loading: bool) -> None:
+        self._btn_cargar.setEnabled(not loading)
+        self._progress.setVisible(loading)
+        self._lbl_cargando.setVisible(loading)
 
     # ── Slots ─────────────────────────────────────────────────────────────
 
     def _on_ops_listas(self, activos: list) -> None:
         cur_cheque = self._combo_cheque.currentData()
         cur_transf = self._combo_transf.currentData()
-        self._combo_cheque.clear(); self._combo_transf.clear()
+        self._combo_cheque.clear()
+        self._combo_transf.clear()
         for o in activos:
             cod = o.get("codigo") or o.get("Codigo", "")
             nom = o.get("nombre") or o.get("Nombre") or cod
@@ -321,8 +459,7 @@ class SettingsDialog(QDialog):
                 combo.setCurrentIndex(idx)
 
     def _on_carga_terminada(self) -> None:
-        self._progress.setVisible(False)
-        self._lbl_cargando.setVisible(False)
+        self._set_loading(False)
 
     def _accept(self) -> None:
         url = self._base_url.text().strip()
@@ -352,10 +489,11 @@ class SettingsDialog(QDialog):
             "cuenta_banco_transferencia_codigo": tr_cod,
             "cuenta_banco_transferencia_nombre": tr_nom,
             "banco_codigo":                      self._banco_codigo.text().strip(),
-            "op_bancaria_cheque_codigo":         self._combo_cheque.currentData() or "EMCHPROP",
-            "op_bancaria_cheque_nombre":         self._combo_cheque.currentText(),
-            "op_bancaria_transferencia_codigo":  self._combo_transf.currentData() or "TLote",
-            "op_bancaria_transferencia_nombre":  self._combo_transf.currentText(),
+            "talonario_op_codigo":               self._talonario_op_codigo.text().strip() or "TE-OP",
+            "op_bancaria_cheque_codigo":          self._combo_cheque.currentData() or "EMCHPROP",
+            "op_bancaria_cheque_nombre":          self._combo_cheque.currentText(),
+            "op_bancaria_transferencia_codigo":   self._combo_transf.currentData() or "TLote",
+            "op_bancaria_transferencia_nombre":   self._combo_transf.currentText(),
         })
         config.save(self._cfg)
         self.accept()
