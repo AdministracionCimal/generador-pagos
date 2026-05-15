@@ -58,6 +58,58 @@ def test_retenciones_incluyen_acumulado_y_codigo_para_preview():
     assert _retencion_label(ret) == "Retención de Ganancias - Enajenación Bs de Cambio"
 
 
+def test_credito_pago_reduce_base_imponible():
+    """El crédito (PAGO -) reduce la base imponible proporcionalmente antes de calcular retenciones."""
+    percepciones = [{"RetencionCodigo": "GAN"}]
+    ret_maestros = {
+        "GAN": {
+            "Nombre": "Ganancias",
+            "RetencionTipoCodigo": "GAN_RET",
+            "ImporteMinimoImponible": 0,
+            "RetencionItems": [{"ImporteDesde": 0, "ImporteHasta": 999999999,
+                                 "Porcentaje": 2, "ImporteFijo": 0}],
+        }
+    }
+
+    # Bruto FC = 10000, crédito = -1000 → neto = 9000 → factor = 0.9
+    # Base bruta = 10000 × ratio 1.0 = 10000
+    # Base neta  = 10000 × 0.9 = 9000 → retención = 9000 × 2% = 180
+    fc  = _item("FC - 100", "10000.00")
+    pago = ItemFactura("PAGO - 999", "", "", Decimal("-1000.00"), None, "")
+
+    retenciones, _ = calcular_retenciones(
+        percepciones, ret_maestros, [fc, pago],
+        ratios_fc={"FC - 100": Decimal("1.0")},
+    )
+
+    assert len(retenciones) == 1
+    assert retenciones[0]["ISAR"] == Decimal("9000.00")
+    assert retenciones[0]["Importe"] == Decimal("180.00")
+
+
+def test_sin_credito_base_imponible_no_cambia():
+    """Sin crédito, la base imponible es el bruto de FCs (comportamiento anterior)."""
+    percepciones = [{"RetencionCodigo": "GAN"}]
+    ret_maestros = {
+        "GAN": {
+            "Nombre": "Ganancias",
+            "RetencionTipoCodigo": "GAN_RET",
+            "ImporteMinimoImponible": 0,
+            "RetencionItems": [{"ImporteDesde": 0, "ImporteHasta": 999999999,
+                                 "Porcentaje": 2, "ImporteFijo": 0}],
+        }
+    }
+
+    fc = _item("FC - 100", "10000.00")
+    retenciones, _ = calcular_retenciones(
+        percepciones, ret_maestros, [fc],
+        ratios_fc={"FC - 100": Decimal("1.0")},
+    )
+
+    assert retenciones[0]["ISAR"] == Decimal("10000.00")
+    assert retenciones[0]["Importe"] == Decimal("200.00")
+
+
 def test_retenciones_sin_historico_usan_nombre_generico_consistente():
     percepciones = [{"RetencionCodigo": "LOC-OB"}]
     ret_maestros = {
