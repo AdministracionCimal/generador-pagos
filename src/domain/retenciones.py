@@ -68,11 +68,31 @@ def calcular_retenciones(
     if not items_fc:
         return [], items
 
-    # Base imponible = porción gravada de lo que se paga en esta OP
-    base_imponible = sum(
+    # Base imponible bruta = porción gravada de las FCs
+    base_imponible_bruta = sum(
         i.importe * Decimal(str(ratios_fc.get(i.documento, Decimal("1"))))
         for i in items_fc
     )
+    if base_imponible_bruta <= Decimal("0"):
+        return [], items
+
+    # Ajustar base por créditos (PAGO - u otros ítems con importe negativo).
+    # El crédito reduce el efectivo a pagar; la base imponible se reduce
+    # en la misma proporción: base_neta = base_bruta × (neto / bruto_fc).
+    bruto_fc = sum(i.importe for i in items_fc)
+    credito_total = sum(
+        i.importe for i in items
+        if not _es_fc(i.documento) and i.importe < Decimal("0")
+    )
+    if credito_total < Decimal("0") and bruto_fc > Decimal("0"):
+        neto = bruto_fc + credito_total   # bruto - abs(credito)
+        factor = (neto / bruto_fc).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        base_imponible = (base_imponible_bruta * factor).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    else:
+        base_imponible = base_imponible_bruta
+
     if base_imponible <= Decimal("0"):
         return [], items
 
