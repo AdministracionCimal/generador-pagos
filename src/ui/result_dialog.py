@@ -1,4 +1,8 @@
-import csv
+from pathlib import Path
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QBrush, QColor
@@ -59,7 +63,8 @@ class ResultDialog(QDialog):
         self._tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         hh = self._tabla.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)   # ancho fijo para badge
+        hh.resizeSection(1, 80)
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
@@ -82,7 +87,11 @@ class ResultDialog(QDialog):
             variant = _ESTADO_VARIANT.get(r["estado"], "neutral")
             self._tabla.setCellWidget(row, 1, theme.make_badge(r["estado"].title(), variant))
             self._tabla.setItem(row, 2, _mk(r.get("numero_previsto", "") or "—"))
-            self._tabla.setItem(row, 3, _mk(r.get("numero_real") or r.get("detalle", "")))
+            # Para OK: numero_real = referencia de la OP (ej. «PAGO - 14062»)
+            # Para ERROR/MANUAL: detalle = mensaje de error o motivo
+            op_real = r.get("numero_real") or ""
+            detalle = r.get("detalle", "") or ""
+            self._tabla.setItem(row, 3, _mk(op_real if op_real else detalle))
             importe  = r.get("importe", "")
             imp_text = _fmt(float(importe)) if isinstance(importe, (int, float)) else str(importe)
             self._tabla.setItem(row, 4, _mk(imp_text, _RIGHT))
@@ -95,8 +104,8 @@ class ResultDialog(QDialog):
         footer_lbl.setObjectName("Muted")
 
         # — Bottom bar ———————————————————————————————————————————————————
-        btn_csv = QPushButton("Exportar CSV")
-        btn_csv.clicked.connect(self._exportar_csv)
+        btn_xlsx = QPushButton("Exportar Excel")
+        btn_xlsx.clicked.connect(self._exportar_excel)
         btn_ok = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         btn_ok.button(QDialogButtonBox.StandardButton.Ok).setObjectName("Primary")
         btn_ok.button(QDialogButtonBox.StandardButton.Ok).setText("Cerrar")
@@ -104,7 +113,7 @@ class ResultDialog(QDialog):
 
         bar = QHBoxLayout()
         bar.setSpacing(10)
-        bar.addWidget(btn_csv)
+        bar.addWidget(btn_xlsx)
         bar.addStretch()
         bar.addWidget(btn_ok)
 
@@ -149,7 +158,7 @@ class ResultDialog(QDialog):
                 sub_lbl.setStyleSheet(f"font-size: 11px; color: {theme.TEXT_MUTED};")
                 v.addWidget(sub_lbl)
             else:
-                # TOTAL CONFIRMADO: only the formatted amount, big
+                # TOTAL CONFIRMADO: solo el monto grande
                 num = QLabel(sub)
                 num.setObjectName("KpiNumber")
                 num.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
@@ -168,29 +177,73 @@ class ResultDialog(QDialog):
 
         return bar
 
-    def _exportar_csv(self) -> None:
+    def _exportar_excel(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Guardar reporte", "resultado_pagos.csv", "CSV (*.csv)"
+            self, "Guardar reporte", "resultado_pagos.xlsx", "Excel (*.xlsx)"
         )
         if not path:
             return
 
-        headers = ["Proveedor", "Estado", "OP Prevista", "OP Real / Detalle", "Importe"]
-        total_ok = 0.0
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Resultado"
 
-        with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.writer(f)
-            w.writerow(headers)
-            for r in self._resultados:
-                importe = r.get("importe", "")
-                imp_val = float(importe) if isinstance(importe, (int, float)) else ""
-                if r["estado"] == "OK" and isinstance(imp_val, float):
-                    total_ok += imp_val
-                w.writerow([
-                    r.get("nombre", ""),
-                    r.get("estado", ""),
-                    r.get("numero_previsto", "") or "",
-                    r.get("numero_real") or r.get("detalle", "") or "",
-                    imp_val,
-                ])
-            w.writerow(["TOTALES", "", "", "", total_ok])
+        # ── Estilos ──────────────────────────────────────────────────────
+        _HEADER_FILL = PatternFill("solid", fgColor="1E3A5F")
+        _ERROR_FILL  = PatternFill("solid", fgColor="FEE2E2")
+        _TOTAL_FILL  = PatternFill("solid", fgColor="EFF6FF")
+        _HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
+        _BOLD        = Font(bold=True, size=10)
+        _NUM_FMT     = '#.##0,00'   # miles con punto, decimales con coma
+
+        headers = ["Proveedor", "Estado", "OP Prevista", "OP Real / Referencia", "Importe"]
+        col_widths = [40, 12, 22, 35, 18]
+
+        # ── Encabezado ───────────────────────────────────────────────────
+        for col, (h, w) in enumerate(zip(headers, col_widths), start=1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font      = _HEADER_FONT
+            cell.fill      = _HEADER_FILL
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.column_dimensions[get_column_letter(col)].width = w
+        ws.row_dimensions[1].height = 20
+
+        # ── Filas de datos ───────────────────────────────────────────────
+        total_ok = 0.0
+        for data_row, r in enumerate(self._resultados, start=2):
+            estado   = r.get("estado", "")
+            op_real  = r.get("numero_real") or ""
+            detalle  = r.get("detalle", "") or ""
+            referencia = op_real if op_real else detalle
+            importe  = r.get("importe", None)
+            imp_val  = float(importe) if isinstance(importe, (int, float)) else None
+
+            if estado == "OK" and imp_val is not None:
+                total_ok += imp_val
+
+            ws.cell(row=data_row, column=1, value=r.get("nombre", ""))
+            ws.cell(row=data_row, column=2, value=estado)
+            ws.cell(row=data_row, column=3, value=r.get("numero_previsto", "") or "")
+            ws.cell(row=data_row, column=4, value=referencia)
+            imp_cell = ws.cell(row=data_row, column=5, value=imp_val)
+            imp_cell.number_format = _NUM_FMT
+            imp_cell.alignment = Alignment(horizontal="right")
+
+            if estado == "ERROR":
+                for col in range(1, 6):
+                    ws.cell(row=data_row, column=col).fill = _ERROR_FILL
+
+        # ── Fila de totales ───────────────────────────────────────────────
+        total_row = len(self._resultados) + 2
+        ws.cell(row=total_row, column=1, value="TOTAL CONFIRMADO").font = _BOLD
+        tot_cell = ws.cell(row=total_row, column=5, value=total_ok)
+        tot_cell.font         = _BOLD
+        tot_cell.number_format = _NUM_FMT
+        tot_cell.alignment    = Alignment(horizontal="right")
+        for col in range(1, 6):
+            ws.cell(row=total_row, column=col).fill = _TOTAL_FILL
+
+        # Freeze header row
+        ws.freeze_panes = "A2"
+
+        wb.save(path)
