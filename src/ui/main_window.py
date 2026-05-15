@@ -839,6 +839,18 @@ class MainWindow(QMainWindow):
             self._guardar_datos_chequera()
             if config.is_configured(self._cfg):
                 self._iniciar_saldo_checker()
+            # Avisos no-fatales (typos en modalidad de pago, etc.)
+            avisos_carga = [
+                f"• {p.nombre}: {a}"
+                for p in self._proveedores for a in p.avisos
+            ]
+            if avisos_carga:
+                QMessageBox.warning(
+                    self,
+                    "Avisos al cargar el Excel",
+                    "Se detectaron observaciones que conviene revisar:\n\n"
+                    + "\n".join(avisos_carga),
+                )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo leer el Excel:\n{e}")
 

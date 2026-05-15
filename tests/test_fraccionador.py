@@ -55,6 +55,13 @@ class TestFraccionarItem:
         cheques, _ = fraccionar_item(item, numero_desde=1, fecha_emision=FECHA_EMISION, anio=2026)
         assert len(cheques) == 1
 
+    def test_movfondos_con_varias_fechas_genera_n_cheques(self):
+        """La cantidad de cheques sale de Forma de pago, no del prefijo MOVFONDOS."""
+        item = _item("MOVFONDOS - 10845", "9000.00", "Ch 15/05 - 30/05 - 15/06")
+        cheques, _ = fraccionar_item(item, numero_desde=1, fecha_emision=FECHA_EMISION, anio=2026)
+        assert len(cheques) == 3
+        assert sum(c.importe for c in cheques) == Decimal("9000.00")
+
 
 class TestFraccionarProveedor:
     def test_dos_movfondos_mas_fc(self):
@@ -94,3 +101,15 @@ class TestFraccionarProveedor:
         # FC-100 → 1 cheque 6000; FC-101 ajustado → 3000 → 1 cheque 3000
         assert len(cheques) == 2
         assert sum(c.importe for c in cheques) == Decimal("9000.00")
+
+    def test_movfondos_positivo_se_trata_como_credito(self):
+        """Un MOVFONDOS con saldo a favor (negativo en interno) no genera cheque."""
+        items = [
+            _item("FC - 100", "10000.00", "Ch 08/06"),
+            # MOVFONDOS positivo en Excel → negativo en interno → crédito
+            ItemFactura("MOVFONDOS - 999", "T", "", Decimal("-500.00"), None, ""),
+        ]
+        cheques, _ = fraccionar_proveedor(items, numero_desde=1, fecha_emision=FECHA_EMISION, anio=2026)
+        # FC = 10000, MOVFONDOS crédito = -500 → total cheques = 9500
+        assert len(cheques) == 1
+        assert cheques[0].importe == Decimal("9500.00")

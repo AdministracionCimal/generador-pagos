@@ -2,7 +2,12 @@ from datetime import date
 
 import pytest
 
-from src.domain.parser_pago import es_cheque, es_transferencia, parsear_fechas_col_l
+from src.domain.parser_pago import (
+    es_cheque,
+    es_transferencia,
+    parsear_fechas_col_l,
+    transferencia_con_typo,
+)
 
 
 class TestParsearFechas:
@@ -64,3 +69,23 @@ class TestEsTransferencia:
 
     def test_no_es_transf_tarjeta(self):
         assert not es_transferencia("Tarjeta de Crédito")
+
+    @pytest.mark.parametrize("typo", [
+        "tranferencia",       # falta 's'
+        "transferensia",      # c→s
+        "transferenia",       # falta 'c'
+        "trnasferencia",      # 'rn' intercambiados
+        "Tranferencia",       # mayúscula + falta 's'
+        "TRANFERENCIA",       # todo mayúsculas + falta 's'
+    ])
+    def test_typos_se_aceptan_como_transferencia(self, typo):
+        assert es_transferencia(typo)
+        assert transferencia_con_typo(typo)
+
+    def test_transferencia_correcta_no_es_typo(self):
+        assert es_transferencia("transferencia")
+        assert not transferencia_con_typo("transferencia")
+
+    @pytest.mark.parametrize("otro", ["tarjeta", "efectivo", "Ch 08/05", "Cheque"])
+    def test_no_transferencia_no_es_typo(self, otro):
+        assert not transferencia_con_typo(otro)

@@ -42,25 +42,22 @@ class TestClasificar:
         p = ProveedorTanda(cuit="123", nombre="VACIO")
         assert clasificar(p).modalidad == Modalidad.MANUAL
 
-    def test_cabecera_pago_se_conserva_como_credito(self):
-        """PAGO - ya no se filtra: es un crédito que descuenta del total."""
+    def test_credito_se_conserva_pero_no_clasifica(self):
+        """Crédito (importe<0) se conserva en items pero no influye en modalidad."""
         p = ProveedorTanda(cuit="123", nombre="TEST", items=[
-            ItemFactura("PAGO - 13992", "", "", Decimal("100"), None, "Ch 08/05"),
-            ItemFactura("FC - 21562", "", "", Decimal("100"), None, "Ch 08/05"),
+            # crédito: importe negativo (PAGO - viene positivo en Excel, dm_reader lo niega)
+            ItemFactura("PAGO - 13992", "", "", Decimal("-100"), None, ""),
+            ItemFactura("FC - 21562",   "", "", Decimal("100"),  None, "Ch 08/05"),
         ])
         result = clasificar(p)
-        # Ambos items se conservan
         assert len(result.items) == 2
-        docs = {i.documento for i in result.items}
-        assert "PAGO - 13992" in docs
-        assert "FC - 21562" in docs
-        # La modalidad se clasifica por el FC, no por el PAGO -
+        # La modalidad se clasifica por el FC, no por el crédito
         assert result.modalidad == Modalidad.CHEQUE_PROPIO
 
-    def test_pago_solo_sin_facturas_es_manual(self):
-        """Solo PAGO - sin FCs → sin items facturables → MANUAL."""
+    def test_solo_credito_sin_pagables_es_manual(self):
+        """Si todos los ítems son créditos (importe<0) → sin pagables → MANUAL."""
         p = ProveedorTanda(cuit="123", nombre="TEST", items=[
-            ItemFactura("PAGO - 13992", "", "", Decimal("100"), None, "transferencia"),
+            ItemFactura("PAGO - 13992", "", "", Decimal("-100"), None, ""),
         ])
         result = clasificar(p)
         assert result.modalidad == Modalidad.MANUAL
@@ -75,3 +72,22 @@ class TestClasificar:
         result = clasificar(p)
         assert len(result.items) == 1
         assert result.items[0].documento == "FC - 21562"
+
+    def test_typo_transferencia_se_clasifica_y_avisa(self):
+        """«Tranferencia» (mal escrita) se acepta como transferencia y agrega aviso."""
+        p = ProveedorTanda(cuit="123", nombre="TEST", items=[
+            ItemFactura("FC - 100", "", "", Decimal("1000"), None, "Tranferencia"),
+        ])
+        result = clasificar(p)
+        assert result.modalidad == Modalidad.TRANSFERENCIA
+        assert len(result.avisos) == 1
+        assert "Tranferencia" in result.avisos[0]
+        assert "transferencia" in result.avisos[0].lower()
+
+    def test_transferencia_correcta_no_genera_aviso(self):
+        p = ProveedorTanda(cuit="123", nombre="TEST", items=[
+            ItemFactura("FC - 100", "", "", Decimal("1000"), None, "transferencia"),
+        ])
+        result = clasificar(p)
+        assert result.modalidad == Modalidad.TRANSFERENCIA
+        assert result.avisos == []
