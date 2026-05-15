@@ -426,9 +426,16 @@ class SettingsDialog(QDialog):
 
     def _on_empresas_listas(self, empresas: list) -> None:
         saved_cod = self._combo_empresa.currentData() or self._cfg.get("empresa_codigo", "EMPRE01")
+        # Compatibilidad con configs viejas que guardaron el ID interno con prefijo.
+        if isinstance(saved_cod, str) and saved_cod.startswith("EMPRESA_"):
+            saved_cod = saved_cod.removeprefix("EMPRESA_")
         self._combo_empresa.clear()
         for e in sorted(empresas, key=lambda x: x.get("nombre", x.get("Nombre", ""))):
             cod = e.get("codigo") or e.get("Codigo", "")
+            # /empresa/list devuelve el ID interno "EMPRESA_EMPRE01"; el POST de OPs
+            # espera el código de negocio "EMPRE01" sin prefijo.
+            if cod.startswith("EMPRESA_"):
+                cod = cod.removeprefix("EMPRESA_")
             nom = e.get("nombre") or e.get("Nombre") or cod
             self._combo_empresa.addItem(nom, cod)
         self._combo_empresa.completer().setModel(self._combo_empresa.model())

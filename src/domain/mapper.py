@@ -41,6 +41,12 @@ def _item_a_ctacte(item, cuenta_proveedor: str) -> dict:
     }
 
 
+def _empresa_codigo_limpio(cod: str) -> str:
+    """Quita el prefijo «EMPRESA_» que devuelve /empresa/list (ID interno).
+    El POST de OPs requiere el código de negocio sin prefijo (ej. «EMPRE01»)."""
+    return cod.removeprefix("EMPRESA_") if isinstance(cod, str) else cod
+
+
 def armar_post(op: OpPago) -> dict:
     p = op.proveedor
     banco = [_cheque_a_banco(ch, op) for ch in op.cheques]
@@ -70,7 +76,7 @@ def armar_post(op: OpPago) -> dict:
 
     return {
         "IdentificacionExterna": "",
-        "EmpresaCodigo": op.empresa_codigo,
+        "EmpresaCodigo": _empresa_codigo_limpio(op.empresa_codigo),
         "NumeroComprobante": "",
         "Proveedor": p.cuit,
         "TransaccionTipoCodigo": "OPERTESORERIA",
