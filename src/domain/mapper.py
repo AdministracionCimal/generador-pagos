@@ -29,12 +29,15 @@ def _cheque_a_banco(ch: ChequeEmitido, op: OpPago) -> dict:
 
 
 def _item_a_ctacte(item, cuenta_proveedor: str) -> dict:
+    # Créditos (PAGO -, NC, importe negativo): van como Haber → DebeHaber=-1, importe positivo.
+    # Finnegans no acepta ImporteMonTransaccion negativo en CtaCte.
+    es_credito = item.importe < 0
     return {
         "CuentaCodigo": cuenta_proveedor,
-        "DebeHaber": 1,
-        "ImporteMonTransaccion": float(item.importe),
+        "DebeHaber": -1 if es_credito else 1,
+        "ImporteMonTransaccion": float(abs(item.importe)),
         "MonedaCodigo": MONEDA_PES,
-        "ImporteMonPrincipal": float(item.importe),
+        "ImporteMonPrincipal": float(abs(item.importe)),
         "Descripcion": item.comprobante,
         "AplicacionOrigen": item.documento,
         "DimensionDistribucion": [],
