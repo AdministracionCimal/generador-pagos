@@ -1,4 +1,8 @@
+import functools
 import logging
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -33,6 +37,7 @@ def _hint(text: str) -> QLabel:
     return lbl
 
 
+@functools.lru_cache(maxsize=512)
 def _fmt_money(value: Decimal | float | int) -> str:
     return f"$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -129,10 +134,11 @@ class _PrecargarWorker(QThread):
     listo    = pyqtSignal(object, object, object, object, object, object)  # cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback, ultimo_op
     error    = pyqtSignal(str)
 
-    def __init__(self, proveedores: list, cfg: dict) -> None:
+    def __init__(self, proveedores: list, cfg: dict, cache_docs: dict | None = None) -> None:
         super().__init__()
         self._proveedores = proveedores
         self._cfg = cfg
+        self._cache_docs = cache_docs
 
     def run(self) -> None:
         cfg = self._cfg
@@ -160,6 +166,7 @@ class _PrecargarWorker(QThread):
         cache: dict = {}
         codigos_ret_cargados: dict = {}
         ratios_fc: dict = {}
+        lock = threading.Lock()
 
         empresa    = cfg.get("empresa_codigo", "")
         mes_inicio = date.today().replace(day=1).strftime("%Y-%m-%d")
@@ -171,8 +178,8 @@ class _PrecargarWorker(QThread):
         ]
         total = len(provs)
 
-        for i, p in enumerate(provs):
-            self.progreso.emit(f"Consultando proveedor {i + 1} de {total}: {p.nombre}")
+        def _precargar_proveedor(p) -> tuple:
+            avisos: list[str] = []
             try:
                 prov_data    = client.get_proveedor(p.cuit)
                 percepciones = prov_data.get("Percepciones", [])
@@ -181,12 +188,17 @@ class _PrecargarWorker(QThread):
                     cod = perc.get("RetencionCodigo")
                     if not cod:
                         continue
-                    if cod not in codigos_ret_cargados:
+                    with lock:
+                        already = cod in codigos_ret_cargados
+                    if not already:
                         try:
-                            codigos_ret_cargados[cod] = client.get_retencion(cod)
+                            ret_data = client.get_retencion(cod)
                         except Exception:
-                            codigos_ret_cargados[cod] = {}
-                    maestros[cod] = codigos_ret_cargados[cod]
+                            ret_data = {}
+                        with lock:
+                            codigos_ret_cargados.setdefault(cod, ret_data)
+                    with lock:
+                        maestros[cod] = codigos_ret_cargados[cod]
 
                 historico: dict = {}
                 tiene_retencion = any(m.get("RetencionItems") for m in maestros.values())
@@ -225,55 +237,81 @@ class _PrecargarWorker(QThread):
                                 historico[key]["ya_retenido"]    += imp_inc
                     except Exception as exc:
                         _LOG.warning("analisisRetencion falló para %s: %s", p.cuit, exc)
-                        self.progreso.emit(
+                        avisos.append(
                             f"⚠ {p.nombre}: no se pudo cargar histórico de retenciones ({exc})"
                         )
 
-                cache[p.cuit] = (percepciones, maestros, historico)
+                with lock:
+                    cache[p.cuit] = (percepciones, maestros, historico)
 
                 if tiene_retencion:
+                    docs_to_fetch = []
                     for item in p.items:
                         doc = item.documento
-                        if not doc.lower().startswith("fc -") or doc in ratios_fc:
+                        if not doc.lower().startswith("fc -"):
                             continue
+                        with lock:
+                            already_ratio = doc in ratios_fc
+                        if not already_ratio:
+                            docs_to_fetch.append(doc)
+                    for doc in docs_to_fetch:
                         try:
-                            fc       = client.get_factura_compra(doc)
-                            gravado  = sum(
+                            fc      = client.get_factura_compra(doc)
+                            gravado = sum(
                                 Decimal(str(c.get("ConceptoImporteGravado", 0)))
                                 for c in fc.get("Conceptos", [])
                             )
                             total_fc = Decimal(str(fc.get("ImporteTotalControl", 0)))
                             if total_fc > 0:
-                                ratios_fc[doc] = gravado / total_fc
+                                with lock:
+                                    ratios_fc.setdefault(doc, gravado / total_fc)
                         except Exception:
                             pass
             except Exception as exc:
                 _LOG.warning("Precarga falló para %s: %s", p.cuit, exc)
-                self.progreso.emit(f"⚠ {p.nombre}: error al precargar datos ({exc})")
+                avisos.append(f"⚠ {p.nombre}: error al precargar datos ({exc})")
+            return p, avisos
 
-        # Verificar saldos pendientes por proveedor (composicionSaldoProveedor)
-        # Una llamada por CUIT en vez de una por comprobante.
-        # docs_pendientes[cuit] = set de IDENTIFICACIONEXTERNA con saldo abierto.
-        # None = consulta falló → fail-open (no bloquear).
-        docs_pendientes: dict[str, set | None] = {}
-        cuits_a_verificar = sorted({
-            p.cuit for p in self._proveedores
-            if p.cuit
-        })
-        fecha_hoy = date.today().strftime("%Y-%m-%d")
-        n_cuits = len(cuits_a_verificar)
-        for i, cuit in enumerate(cuits_a_verificar):
-            self.progreso.emit(f"Verificando saldo {i + 1}/{n_cuits}: {cuit}")
-            try:
-                rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
-                docs_pendientes[cuit] = {
-                    r["IDENTIFICACIONEXTERNA"]
-                    for r in rows
-                    if r.get("IDENTIFICACIONEXTERNA")
-                    and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
-                }
-            except Exception:
-                docs_pendientes[cuit] = None  # fail-open: incluir todos
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futs = {pool.submit(_precargar_proveedor, p): p for p in provs}
+            for i, fut in enumerate(as_completed(futs), 1):
+                p_orig = futs[fut]
+                try:
+                    _, avisos = fut.result()
+                except Exception:
+                    avisos = []
+                for aviso in avisos:
+                    self.progreso.emit(aviso)
+                self.progreso.emit(f"Consultando proveedor {i} de {total}: {p_orig.nombre}")
+
+        # Verificar saldos pendientes por proveedor (composicionSaldoProveedor).
+        # Si hay cache fresco del _SaldoCheckerWorker, reutilizarlo para ahorrar ~1-2 s.
+        if self._cache_docs is not None:
+            docs_pendientes: dict[str, set | None] = self._cache_docs
+        else:
+            docs_pendientes = {}
+            cuits_a_verificar = sorted({p.cuit for p in self._proveedores if p.cuit})
+            fecha_hoy = date.today().strftime("%Y-%m-%d")
+            n_cuits = len(cuits_a_verificar)
+
+            def _fetch_saldo(cuit: str) -> tuple[str, "set | None"]:
+                try:
+                    rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
+                    return cuit, {
+                        r["IDENTIFICACIONEXTERNA"]
+                        for r in rows
+                        if r.get("IDENTIFICACIONEXTERNA")
+                        and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
+                    }
+                except Exception:
+                    return cuit, None
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futs_saldo = {pool.submit(_fetch_saldo, c): c for c in cuits_a_verificar}
+                for i, fut in enumerate(as_completed(futs_saldo), 1):
+                    cuit, resultado = fut.result()
+                    docs_pendientes[cuit] = resultado
+                    self.progreso.emit(f"Verificando saldo {i}/{n_cuits}: {cuit}")
 
         self.listo.emit(
             cotizacion_dolar,
@@ -337,18 +375,27 @@ class _SaldoCheckerWorker(QThread):
             cuits = sorted({p.cuit for p in self._proveedores if p.cuit})
             fecha_hoy = date.today().strftime("%Y-%m-%d")
             docs_pendientes: dict = {}
-            for i, cuit in enumerate(cuits):
-                self.progreso.emit(f"Verificando saldo {i + 1}/{len(cuits)}: {cuit}")
+            total = len(cuits)
+
+            def _fetch(cuit: str) -> tuple[str, "set | None"]:
                 try:
                     rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
-                    docs_pendientes[cuit] = {
+                    return cuit, {
                         r["IDENTIFICACIONEXTERNA"]
                         for r in rows
                         if r.get("IDENTIFICACIONEXTERNA")
                         and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
                     }
                 except Exception:
-                    docs_pendientes[cuit] = None  # fail-open
+                    return cuit, None
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futs = {pool.submit(_fetch, c): c for c in cuits}
+                for i, fut in enumerate(as_completed(futs), 1):
+                    cuit, resultado = fut.result()
+                    docs_pendientes[cuit] = resultado
+                    self.progreso.emit(f"Verificando saldo {i}/{total}: {cuit}")
+
             self.listo.emit(docs_pendientes)
         except Exception:
             self.listo.emit({})  # fail-open: no bloquear
@@ -421,6 +468,8 @@ class MainWindow(QMainWindow):
         self._precarga_worker: _PrecargarWorker | None = None
         self._actualizando_tabla = False
         self._ultimo_cheque: int = 0
+        self._docs_pendientes_cache: dict | None = None
+        self._docs_pendientes_ts: float = 0.0
         self._build_ui()
         self._build_menu()
         if not config.is_configured(self._cfg):
@@ -486,6 +535,9 @@ class MainWindow(QMainWindow):
         self._inp_cheq_limite.setPlaceholderText("ej. 73190500")
         self._lbl_disponibles = QLabel("")
         self._lbl_disponibles.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._debounce_tabla = QTimer(self)
+        self._debounce_tabla.setSingleShot(True)
+        self._debounce_tabla.timeout.connect(self._poblar_tabla_si_proveedores)
         for w in (self._inp_cheq_ultimo, self._inp_cheq_limite):
             w.textChanged.connect(self._actualizar_disponibles)
         root.addWidget(self._card_chequera())
@@ -670,6 +722,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_saldo_dlg") and self._saldo_dlg.isVisible():
             self._saldo_dlg.accept()
 
+        self._docs_pendientes_cache = docs_pendientes
+        self._docs_pendientes_ts = time.monotonic()
+
         # Auto-eliminar proveedores cuyos ítems ya no tienen saldo pendiente
         removidos: list[str] = []
         nuevos: list = []
@@ -805,6 +860,7 @@ class MainWindow(QMainWindow):
             filas.append((p, n_cheques, estado))
 
         self._actualizando_tabla = True
+        self._tabla.setUpdatesEnabled(False)
         self._tabla.setRowCount(len(filas))
         self._ops_a_procesar = []
 
@@ -832,6 +888,7 @@ class MainWindow(QMainWindow):
             label, variant = _ESTADOS[estado]
             self._tabla.setCellWidget(row, 6, theme.make_badge(label, variant))
 
+        self._tabla.setUpdatesEnabled(True)
         self._actualizando_tabla = False
 
         listos = sum(1 for _, _, e in filas if e == "LISTO")
@@ -906,6 +963,10 @@ class MainWindow(QMainWindow):
             self._lbl_disponibles.setText("—")
             self._lbl_disponibles.setStyleSheet(theme.badge_qss("neutral"))
         if self._proveedores:
+            self._debounce_tabla.start(150)
+
+    def _poblar_tabla_si_proveedores(self) -> None:
+        if self._proveedores:
             self._poblar_tabla()
 
     def _numero_desde(self) -> int | None:
@@ -952,7 +1013,14 @@ class MainWindow(QMainWindow):
         self._lbl_progreso.setVisible(True)
         self._btn_procesar.setEnabled(False)
 
-        self._precarga_worker = _PrecargarWorker(list(self._proveedores), self._cfg)
+        _CACHE_TTL = 300  # 5 minutos
+        cache_docs = (
+            self._docs_pendientes_cache
+            if self._docs_pendientes_cache is not None
+            and time.monotonic() - self._docs_pendientes_ts < _CACHE_TTL
+            else None
+        )
+        self._precarga_worker = _PrecargarWorker(list(self._proveedores), self._cfg, cache_docs=cache_docs)
         self._precarga_worker.progreso.connect(self._on_precarga_progreso)
         self._precarga_worker.listo.connect(self._on_precarga_lista)
         self._precarga_worker.error.connect(self._on_precarga_error)
