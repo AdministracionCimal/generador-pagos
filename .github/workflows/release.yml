@@ -1,0 +1,43 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Compilar .exe
+        run: pyinstaller GeneradorDePagos.spec --noconfirm
+
+      - name: Publicar release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: "Última versión"
+          body: |
+            ## Generador de Pagos
+
+            Descargá **GeneradorDePagos.exe** y ejecutalo directamente — no requiere instalación ni Python.
+
+            ---
+            Compilado automáticamente desde el commit `${{ github.sha }}`.
+          artifacts: dist/GeneradorDePagos.exe
+          allowUpdates: true
+          removeArtifacts: true
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
