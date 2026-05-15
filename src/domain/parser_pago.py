@@ -1,8 +1,22 @@
 import re
 from datetime import date
+from difflib import SequenceMatcher
 
 
 _RE_FECHA = re.compile(r"(\d{1,2})/(\d{1,2})")
+
+# Variantes exactas válidas para «transferencia»
+_TRANSFERENCIA_EXACTAS = {
+    "transferencia",
+    "transferencia interbancaria",
+    "transf",
+    "transf.",
+}
+# Similitud mínima para aceptar typos como «tranferencia», «transferensia», etc.
+# El gap es grande: typos reales caen en 0.83-0.98; términos no relacionados
+# («tarjeta», «efectivo», «cheque») quedan por debajo de 0.40. 0.80 cubre
+# typos múltiples sin riesgo de falsos positivos.
+_TRANSFERENCIA_THRESHOLD = 0.80
 
 
 def parsear_fechas_col_l(
@@ -44,6 +58,25 @@ def es_cheque(texto: str) -> bool:
     return bool(re.search(r"\bch\s*\d", t))
 
 
-def es_transferencia(texto: str) -> bool:
+def _similitud_transferencia(texto: str) -> float:
     t = (texto or "").strip().lower()
-    return t in {"transferencia", "transferencia interbancaria"}
+    if not t:
+        return 0.0
+    return SequenceMatcher(None, t, "transferencia").ratio()
+
+
+def es_transferencia(texto: str) -> bool:
+    """True si es transferencia exacta o un typo cercano (ej. «tranferencia»)."""
+    t = (texto or "").strip().lower()
+    if t in _TRANSFERENCIA_EXACTAS:
+        return True
+    return _similitud_transferencia(t) >= _TRANSFERENCIA_THRESHOLD
+
+
+def transferencia_con_typo(texto: str) -> bool:
+    """True si el texto se interpretó como transferencia pero está mal escrito.
+    Útil para avisar al usuario que corrija la ortografía en el Excel."""
+    t = (texto or "").strip().lower()
+    if not t or t in _TRANSFERENCIA_EXACTAS:
+        return False
+    return _similitud_transferencia(t) >= _TRANSFERENCIA_THRESHOLD

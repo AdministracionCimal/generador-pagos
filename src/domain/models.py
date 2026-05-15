@@ -27,6 +27,7 @@ class ProveedorTanda:
     items: list[ItemFactura] = field(default_factory=list)
     modalidad: Modalidad = Modalidad.MANUAL
     motivo_manual: str = ""
+    avisos: list[str] = field(default_factory=list)   # advertencias no-fatales (ej. typos)
 
     @property
     def importe_total(self) -> Decimal:

@@ -10,9 +10,13 @@ from src.domain.models import ItemFactura, ProveedorTanda
 
 HOJA_DM = "DM"
 
-_PREFIJOS_ITEM    = ("fc -", "movfondos -", "nccpra -", "ndcpra -")
-_PREFIJOS_CREDITO = ("pago -",)   # saldo a favor: descuenta del total, importe negativo
-_PREFIJOS_IGNORAR = ("op -",)     # ya procesadas por Finnegans, se ignoran
+# Convención de signos:
+#   Excel/Finnegans: negativo = adeuda al proveedor, positivo = saldo a favor
+#   Interno (app):   positivo = a pagar (genera cheque/transfer), negativo = crédito
+# Por eso invertimos el signo al leer.
+#
+# Qué filas se procesan: las pintadas de amarillo (solo_amarillas=True).
+# El prefijo del documento no decide validez — lo decide la marca del usuario.
 
 def _normalizar(s: str) -> str:
     """Minúsculas y sin tildes para comparar headers."""
@@ -134,12 +138,7 @@ def leer_dm(path: Path | str, hoja: str = HOJA_DM,
             continue
 
         documento = str(_cel(row, cols.get("documento")) or "").strip()
-        doc_lower = documento.lower()
-
-        if any(doc_lower.startswith(p) for p in _PREFIJOS_IGNORAR):
-            continue
-        es_credito = any(doc_lower.startswith(p) for p in _PREFIJOS_CREDITO)
-        if not es_credito and not any(doc_lower.startswith(p) for p in _PREFIJOS_ITEM):
+        if not documento:
             continue
 
         proveedor_nombre = str(_cel(row, cols.get("proveedor")) or "").strip()
@@ -147,11 +146,13 @@ def leer_dm(path: Path | str, hoja: str = HOJA_DM,
             continue
 
         importe_raw = _importe(_cel(row, cols.get("importe")))
-        if importe_raw is None:
+        if importe_raw is None or importe_raw == 0:
             continue
-        # Créditos (PAGO -) descuentan: siempre negativos.
-        # Facturas e items normales: siempre positivos.
-        importe = -abs(importe_raw) if es_credito else abs(importe_raw)
+        # Inversión universal del signo: el signo del Excel determina si adeuda
+        # (negativo en Excel → positivo interno = a pagar) o si es crédito
+        # (positivo en Excel → negativo interno = saldo a favor).
+        # Esto aplica a TODO tipo de documento (FC, ND, NC, PAGO, MOVFONDOS).
+        importe = -importe_raw
 
         cuit_raw = str(_cel(row, cols.get("cuit")) or "").strip()
         cuit = _limpiar_cuit(cuit_raw) if cuit_raw else ""
