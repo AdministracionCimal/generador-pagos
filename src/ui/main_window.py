@@ -1196,12 +1196,22 @@ class MainWindow(QMainWindow):
             if p.modalidad == Modalidad.MANUAL or not p.items:
                 continue
 
-            # Filtrar ítems sin saldo pendiente según composicionSaldoProveedor
+            # Filtrar ítems sin saldo pendiente según composicionSaldoProveedor.
+            # Los créditos (PAGO -) siempre se incluyen: no figuran en composición
+            # de saldo porque ya están aplicados en Finnegans, pero deben estar
+            # en el POST para descontar del total.
             pendientes = docs_pendientes.get(p.cuit) if p.cuit else None
             if pendientes is not None:
-                # pendientes = set de documentos con saldo abierto en Finnegans
-                items_sin_saldo = [i for i in p.items if i.documento not in pendientes]
-                items_base = [i for i in p.items if i.documento in pendientes]
+                items_sin_saldo = [
+                    i for i in p.items
+                    if i.documento not in pendientes
+                    and not i.documento.lower().startswith("pago -")
+                ]
+                items_base = [
+                    i for i in p.items
+                    if i.documento in pendientes
+                    or i.documento.lower().startswith("pago -")
+                ]
                 for item in items_sin_saldo:
                     self._ops_advertencias.append(
                         f"• {p.nombre}: {item.documento} — sin saldo pendiente, omitido."

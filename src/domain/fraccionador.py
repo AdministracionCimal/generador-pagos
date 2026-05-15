@@ -5,11 +5,17 @@ from .models import ChequeEmitido, ItemFactura
 from .parser_pago import parsear_fechas_col_l
 
 _DOCS_UN_CHEQUE = {"movfondos", "nccpra", "ndcpra"}
+_DOCS_CREDITO   = {"pago"}   # saldo a favor: no genera cheque, descuenta del total
 
 
 def _es_un_cheque(documento: str) -> bool:
     doc = documento.strip().split(" - ")[0].lower().replace(" ", "")
     return any(doc.startswith(p) for p in _DOCS_UN_CHEQUE)
+
+
+def _es_credito(documento: str) -> bool:
+    doc = documento.strip().split(" - ")[0].lower().replace(" ", "")
+    return any(doc.startswith(p) for p in _DOCS_CREDITO)
 
 
 def fraccionar_item(
@@ -77,8 +83,12 @@ def fraccionar_proveedor(
     emite N cheques sobre el TOTAL de todos los FCs (no N cheques por cada FC).
     Los ítems de tipo MOVFONDOS/NCCPRA/NDCPRA siempre van con 1 cheque c/u.
     """
-    items_fc        = [i for i in items if not _es_un_cheque(i.documento)]
+    items_credito   = [i for i in items if     _es_credito(i.documento)]
+    items_fc        = [i for i in items if not _es_un_cheque(i.documento) and not _es_credito(i.documento)]
     items_un_cheque = [i for i in items if     _es_un_cheque(i.documento)]
+
+    # Crédito total a descontar del último cheque generado (siempre ≤ 0)
+    credito_total = sum(i.importe for i in items_credito)
 
     todos: list[ChequeEmitido] = []
     siguiente = numero_desde
@@ -119,5 +129,13 @@ def fraccionar_proveedor(
     for item in items_un_cheque:
         cheques, siguiente = fraccionar_item(item, siguiente, fecha_emision, anio)
         todos.extend(cheques)
+
+    # ── Aplicar crédito (PAGO -) al último cheque ──────────────────────────
+    # El importe del crédito ya es negativo; sumarlo reduce el último cheque,
+    # de modo que Banco y CtaCte queden balanceados en Finnegans.
+    if credito_total < 0 and todos:
+        from dataclasses import replace as _dc_replace
+        ultimo = todos[-1]
+        todos[-1] = _dc_replace(ultimo, importe=ultimo.importe + credito_total)
 
     return todos, siguiente
