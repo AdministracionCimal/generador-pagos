@@ -23,11 +23,12 @@ def _normalizar(s: str) -> str:
 # Evita falsos positivos: "Condicionpago" no debe matchear "pago";
 # "Fecha comprobante" no debe matchear "comprobante".
 _EXACT = {
-    "cuit":        "cuit",
-    "documento":   "documento",
-    "proveedor":   "proveedor",
-    "comprobante": "comprobante",
-    "pago":        "pago",
+    "cuit":          "cuit",
+    "documento":     "documento",
+    "proveedor":     "proveedor",
+    "comprobante":   "comprobante",
+    "forma de pago": "pago",   # header preferido
+    "pago":          "pago",   # fallback para archivos con header «PAGO»
 }
 
 # Campos detectados por contener la clave en cualquier parte del header.
