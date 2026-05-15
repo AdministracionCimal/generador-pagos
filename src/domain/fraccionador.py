@@ -1,3 +1,4 @@
+from dataclasses import replace as _dc_replace
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -5,11 +6,17 @@ from .models import ChequeEmitido, ItemFactura
 from .parser_pago import parsear_fechas_col_l
 
 _DOCS_UN_CHEQUE = {"movfondos", "nccpra", "ndcpra"}
+_DOCS_CREDITO   = {"pago"}   # saldo a favor: no genera cheque, descuenta del total
 
 
 def _es_un_cheque(documento: str) -> bool:
     doc = documento.strip().split(" - ")[0].lower().replace(" ", "")
     return any(doc.startswith(p) for p in _DOCS_UN_CHEQUE)
+
+
+def _es_credito(documento: str) -> bool:
+    doc = documento.strip().split(" - ")[0].lower().replace(" ", "")
+    return any(doc.startswith(p) for p in _DOCS_CREDITO)
 
 
 def fraccionar_item(
@@ -77,8 +84,12 @@ def fraccionar_proveedor(
     emite N cheques sobre el TOTAL de todos los FCs (no N cheques por cada FC).
     Los ítems de tipo MOVFONDOS/NCCPRA/NDCPRA siempre van con 1 cheque c/u.
     """
-    items_fc        = [i for i in items if not _es_un_cheque(i.documento)]
+    items_credito   = [i for i in items if     _es_credito(i.documento)]
+    items_fc        = [i for i in items if not _es_un_cheque(i.documento) and not _es_credito(i.documento)]
     items_un_cheque = [i for i in items if     _es_un_cheque(i.documento)]
+
+    # Crédito total (PAGO -): ya negativo, reduce el bruto antes de dividir cheques
+    credito_total = sum(i.importe for i in items_credito)
 
     todos: list[ChequeEmitido] = []
     siguiente = numero_desde
@@ -94,9 +105,9 @@ def fraccionar_proveedor(
         consolidar = len(claves) == 1 and all(len(fs) > 0 for fs in fechas_por_item)
 
         if consolidar and len(items_fc) > 1:
-            # Un único set de N cheques por el total de todos los FCs
+            # Un único set de N cheques por el total neto (FCs − créditos PAGO -)
             fechas = fechas_por_item[0]
-            total  = sum(i.importe for i in items_fc)
+            total  = sum(i.importe for i in items_fc) + credito_total
             n      = len(fechas)
             base   = (total / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             ajuste = total - base * n          # diferencia de centavos al último
@@ -110,8 +121,15 @@ def fraccionar_proveedor(
                 ))
             siguiente += n
         else:
-            # Fechas distintas entre FCs → fraccionar cada una por separado
-            for item in items_fc:
+            # Fechas distintas entre FCs → fraccionar cada una por separado.
+            # Aplicar el crédito (PAGO -) al último FC antes de fraccionar,
+            # de modo que el total de cheques = bruto − créditos.
+            if credito_total != 0 and items_fc:
+                ultimo_fc = _dc_replace(items_fc[-1], importe=items_fc[-1].importe + credito_total)
+                items_fc_adj = items_fc[:-1] + [ultimo_fc]
+            else:
+                items_fc_adj = items_fc
+            for item in items_fc_adj:
                 cheques, siguiente = fraccionar_item(item, siguiente, fecha_emision, anio)
                 todos.extend(cheques)
 

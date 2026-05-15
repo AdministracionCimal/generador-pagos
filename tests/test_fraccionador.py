@@ -68,3 +68,29 @@ class TestFraccionarProveedor:
         assert siguiente == 73189915
         total = sum(c.importe for c in cheques)
         assert total == Decimal("917918.65") + Decimal("917918.65") + Decimal("12014792.88")
+
+    def test_credito_pago_reduce_total_consolidado(self):
+        """PAGO - (negativo) reduce el bruto de FCs ANTES de dividir los cheques."""
+        items = [
+            _item("FC - 100", "10000.00", "Ch 08/06 - 09/06"),
+            _item("FC - 101", "10000.00", "Ch 08/06 - 09/06"),
+            # crédito: vino positivo en Excel, ya fue negado por dm_reader
+            ItemFactura("PAGO - 5000", "TEST", "", Decimal("-1000.00"), None, ""),
+        ]
+        cheques, _ = fraccionar_proveedor(items, numero_desde=1, fecha_emision=FECHA_EMISION, anio=2026)
+        # Bruto FC = 20000, crédito = -1000, total neto = 19000 → 2 cheques de 9500
+        assert len(cheques) == 2
+        assert sum(c.importe for c in cheques) == Decimal("19000.00")
+        assert all(c.importe == Decimal("9500.00") for c in cheques)
+
+    def test_credito_pago_reduce_ultimo_fc_no_consolidado(self):
+        """PAGO - con FCs de fechas distintas: crédito se aplica al último FC antes de fraccionar."""
+        items = [
+            _item("FC - 100", "6000.00", "Ch 08/06"),
+            _item("FC - 101", "4000.00", "Ch 15/06"),
+            ItemFactura("PAGO - 5000", "TEST", "", Decimal("-1000.00"), None, ""),
+        ]
+        cheques, _ = fraccionar_proveedor(items, numero_desde=1, fecha_emision=FECHA_EMISION, anio=2026)
+        # FC-100 → 1 cheque 6000; FC-101 ajustado → 3000 → 1 cheque 3000
+        assert len(cheques) == 2
+        assert sum(c.importe for c in cheques) == Decimal("9000.00")

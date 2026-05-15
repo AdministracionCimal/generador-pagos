@@ -42,10 +42,35 @@ class TestClasificar:
         p = ProveedorTanda(cuit="123", nombre="VACIO")
         assert clasificar(p).modalidad == Modalidad.MANUAL
 
-    def test_cabecera_pago_se_filtra(self):
+    def test_cabecera_pago_se_conserva_como_credito(self):
+        """PAGO - ya no se filtra: es un crédito que descuenta del total."""
         p = ProveedorTanda(cuit="123", nombre="TEST", items=[
             ItemFactura("PAGO - 13992", "", "", Decimal("100"), None, "Ch 08/05"),
             ItemFactura("FC - 21562", "", "", Decimal("100"), None, "Ch 08/05"),
+        ])
+        result = clasificar(p)
+        # Ambos items se conservan
+        assert len(result.items) == 2
+        docs = {i.documento for i in result.items}
+        assert "PAGO - 13992" in docs
+        assert "FC - 21562" in docs
+        # La modalidad se clasifica por el FC, no por el PAGO -
+        assert result.modalidad == Modalidad.CHEQUE_PROPIO
+
+    def test_pago_solo_sin_facturas_es_manual(self):
+        """Solo PAGO - sin FCs → sin items facturables → MANUAL."""
+        p = ProveedorTanda(cuit="123", nombre="TEST", items=[
+            ItemFactura("PAGO - 13992", "", "", Decimal("100"), None, "transferencia"),
+        ])
+        result = clasificar(p)
+        assert result.modalidad == Modalidad.MANUAL
+        assert result.motivo_manual == "Sin items facturables"
+
+    def test_op_se_sigue_filtrando(self):
+        """OP - sigue siendo ignorado (ya procesado en Finnegans)."""
+        p = ProveedorTanda(cuit="123", nombre="TEST", items=[
+            ItemFactura("OP - 99999", "", "", Decimal("500"), None, "transferencia"),
+            ItemFactura("FC - 21562", "", "", Decimal("100"), None, "transferencia"),
         ])
         result = clasificar(p)
         assert len(result.items) == 1

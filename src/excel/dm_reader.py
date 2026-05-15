@@ -10,8 +10,9 @@ from src.domain.models import ItemFactura, ProveedorTanda
 
 HOJA_DM = "DM"
 
-_PREFIJOS_ITEM = ("fc -", "movfondos -", "nccpra -", "ndcpra -")
-_PREFIJOS_IGNORAR = ("pago -", "op -")
+_PREFIJOS_ITEM    = ("fc -", "movfondos -", "nccpra -", "ndcpra -")
+_PREFIJOS_CREDITO = ("pago -",)   # saldo a favor: descuenta del total, importe negativo
+_PREFIJOS_IGNORAR = ("op -",)     # ya procesadas por Finnegans, se ignoran
 
 def _normalizar(s: str) -> str:
     """Minúsculas y sin tildes para comparar headers."""
@@ -136,7 +137,8 @@ def leer_dm(path: Path | str, hoja: str = HOJA_DM,
 
         if any(doc_lower.startswith(p) for p in _PREFIJOS_IGNORAR):
             continue
-        if not any(doc_lower.startswith(p) for p in _PREFIJOS_ITEM):
+        es_credito = any(doc_lower.startswith(p) for p in _PREFIJOS_CREDITO)
+        if not es_credito and not any(doc_lower.startswith(p) for p in _PREFIJOS_ITEM):
             continue
 
         proveedor_nombre = str(_cel(row, cols.get("proveedor")) or "").strip()
@@ -146,7 +148,9 @@ def leer_dm(path: Path | str, hoja: str = HOJA_DM,
         importe_raw = _importe(_cel(row, cols.get("importe")))
         if importe_raw is None:
             continue
-        importe = abs(importe_raw)
+        # Créditos (PAGO -) descuentan: siempre negativos.
+        # Facturas e items normales: siempre positivos.
+        importe = -abs(importe_raw) if es_credito else abs(importe_raw)
 
         cuit_raw = str(_cel(row, cols.get("cuit")) or "").strip()
         cuit = _limpiar_cuit(cuit_raw) if cuit_raw else ""

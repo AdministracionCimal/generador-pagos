@@ -1,17 +1,26 @@
 from .models import Modalidad, ProveedorTanda
 from .parser_pago import es_cheque, es_transferencia
 
-_DOCS_NO_PAGO = {"pago", "op"}  # prefijos que son cabeceras, no facturas
+_DOCS_IGNORAR = {"op"}    # ya procesadas por Finnegans → se eliminan
+_DOCS_CREDITO = {"pago"}  # saldo a favor → se conservan pero no clasifican
 
 
-def _es_item_facturable(documento: str) -> bool:
+def _es_ignorable(documento: str) -> bool:
     doc = (documento or "").strip().lower()
-    return not any(doc.startswith(p) for p in _DOCS_NO_PAGO)
+    return any(doc.startswith(p) for p in _DOCS_IGNORAR)
+
+
+def _es_credito(documento: str) -> bool:
+    doc = (documento or "").strip().lower()
+    return any(doc.startswith(p) for p in _DOCS_CREDITO)
 
 
 def clasificar(proveedor: ProveedorTanda) -> ProveedorTanda:
-    items_reales = [i for i in proveedor.items if _es_item_facturable(i.documento)]
-    proveedor.items = items_reales
+    # Eliminar solo OP -; los PAGO - (créditos) se conservan en items
+    proveedor.items = [i for i in proveedor.items if not _es_ignorable(i.documento)]
+
+    # Clasificar basándose únicamente en los ítems que no son créditos
+    items_reales = [i for i in proveedor.items if not _es_credito(i.documento)]
 
     if not items_reales:
         proveedor.modalidad = Modalidad.MANUAL
