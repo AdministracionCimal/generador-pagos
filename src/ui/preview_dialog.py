@@ -80,6 +80,7 @@ class PreviewDialog(QDialog):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         content = QWidget()
+        content.setStyleSheet(f"background-color: {theme.BG_APP};")
         stack = QVBoxLayout(content)
         stack.setContentsMargins(0, 0, 0, 0)
         stack.setSpacing(12)

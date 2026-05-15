@@ -1013,7 +1013,7 @@ class MainWindow(QMainWindow):
         self._lbl_progreso.setVisible(True)
         self._btn_procesar.setEnabled(False)
 
-        _CACHE_TTL = 300  # 5 minutos
+        _CACHE_TTL = 900  # 15 minutos
         cache_docs = (
             self._docs_pendientes_cache
             if self._docs_pendientes_cache is not None
