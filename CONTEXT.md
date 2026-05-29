@@ -12,7 +12,7 @@ El config se guarda cifrado con Fernet en `%APPDATA%/GeneradorDePagos/`.
 
 - Python 3.11+, PyQt6, openpyxl, httpx, cryptography
 - Sin base de datos local; todo en memoria durante la sesión
-- Distribuido como .exe con PyInstaller
+- Distribuido como `.exe` con PyInstaller (auto-build vía GitHub Actions)
 
 ---
 
@@ -24,12 +24,12 @@ src/
   main.py                 ← entry point PyQt6
   domain/
     models.py             ← ItemFactura, ProveedorTanda, ChequeEmitido, OpPago, Modalidad
-    clasificador.py       ← asigna CHEQUE_PROPIO / TRANSFERENCIA / MANUAL
-    parser_pago.py        ← parsea "Ch 08/05 - 10/05", detecta modalidad, infiere año
+    clasificador.py       ← asigna CHEQUE_PROPIO / TRANSFERENCIA / MANUAL (por signo + Forma de pago)
+    parser_pago.py        ← parsea "Ch 08/05 - 10/05", detecta modalidad, fuzzy match transferencia
     fraccionador.py       ← genera ChequeEmitido[] (consolida FCs con mismas fechas)
     numeracion.py         ← calcula secuencia prevista de comprobantes OP
-    retenciones.py        ← escala Ganancias con acumulado histórico del mes
-    mapper.py             ← arma JSON del POST /ordenPago
+    retenciones.py        ← escala Ganancias con acumulado histórico + reducción por créditos
+    mapper.py             ← arma JSON del POST /ordenPago (sanitiza EmpresaCodigo)
   excel/
     dm_reader.py          ← lee hoja "DM", filtra filas amarillas → ProveedorTanda[]
   api/
@@ -38,34 +38,68 @@ src/
   util/
     audit.py              ← log persistente JSONL de request/response Finnegans
   ui/
-    main_window.py        ← ventana principal, worker threads
+    main_window.py        ← ventana principal, worker threads paralelos
     preview_dialog.py     ← resumen antes de confirmar
-    result_dialog.py      ← resultados después de procesar
-    settings_dialog.py    ← configuración de la app
+    result_dialog.py      ← resultados después de procesar (export a Excel)
+    settings_dialog.py    ← configuración (sanitiza prefijo EMPRESA_)
     theme.py              ← estilos visuales + NoScrollComboBox
     icons/
-      chevron_down.svg    ← flecha combo/árbol (stroke #475569)
-      chevron_right.svg   ← rama árbol cerrada
+      chevron_down.svg
+      chevron_right.svg
 tests/
-  test_smoke.py           ← smoke tests; suite completa actual: 56 tests
-  test_parser_pago.py     ← tests de es_cheque, parsear_fechas_col_l, es_transferencia
+  test_smoke.py
+  test_parser_pago.py
+  test_clasificador.py
+  test_fraccionador.py
+  test_retenciones.py
+  test_mapper.py
+  test_dm_reader.py
+  test_result_dialog.py
   fixtures/               ← 07.05.2025.xlsx, response_OP-0004-00021922.json
+
+.github/workflows/
+  release.yml             ← compila y publica el .exe al release "latest" en cada push a master
 ```
+
+---
+
+## Convención de signos (lógica universal)
+
+Regla central que decide todo el comportamiento:
+
+| Excel (Finnegans) | Interno (app) | Significado |
+|---|---|---|
+| Negativo (FC, ND, MOVFONDOS) | Positivo | **A pagar** (genera cheque/transferencia) |
+| Positivo (PAGO, NC, MOVFONDOS) | Negativo | **Crédito / saldo a favor** (reduce el bruto, no genera cheque) |
+
+`dm_reader` aplica `importe_interno = -importe_excel` universalmente. **El prefijo del documento NO decide si es crédito o pagable** — solo el signo lo decide. Esto cubre el caso de MOVFONDOS que pueden venir en positivo o negativo según corresponda.
+
+### Uso del prefijo del documento
+
+El prefijo (FC, MOVFONDOS, NC, ND, PAGO) ya **no** decide validez ni clasificación. Sus únicos usos son:
+
+1. **`fraccionador`**: distinguir FCs (consolidables si comparten fechas) del resto de pagables
+2. **`mapper` (POST)**: `AplicacionOrigen = item.documento` (con prefijo) — Finnegans lo usa para aplicar el pago al documento correcto
+
+### Validez de fila en `dm_reader`
+
+La única regla de validez es: **fila pintada de amarillo + documento no vacío + proveedor + importe ≠ 0**. No hay whitelist de prefijos.
 
 ---
 
 ## Flujo de datos
 
 1. Usuario carga Excel → `leer_dm()` → lista de `ProveedorTanda`
-2. `_ChiquerasLoader` (QThread): carga chequeras al inicio automáticamente; rellena ÚLTIMO Nº y LÍMITE desde el detalle del talonario
-3. `_SaldoCheckerWorker` (QThread): al cargar Excel, consulta `composicionSaldoProveedor` por cada CUIT con modal de carga bloqueante; auto-elimina proveedores sin saldo pendiente de `self._proveedores`
-4. `_PrecargarWorker` (QThread): consulta Finnegans → retenciones, ratios FC, cotización dólar, docs pendientes por CUIT y último comprobante OP (`Talonario/{TE-OP}`)
-5. `_construir_ops()` → arma `OpPago[]` con cheques fraccionados y retenciones calculadas. Los proveedores que superan el límite de la chequera van a `_proveedores_overflow`
-6. `_manejar_overflow()` → si hay overflow, diálogo para asignar chequera alternativa y construir las OPs restantes sin saltar números
-7. `_asignar_numeros_op()` → calcula `numero_comprobante_estimado` para comparar OP prevista vs OP real devuelta por Finnegans
+   - Si se detectan typos en "transferencia" → diálogo de avisos al usuario
+2. `_ChiquerasLoader` (QThread): carga chequeras automáticamente; rellena ÚLTIMO Nº y LÍMITE
+3. `_SaldoCheckerWorker` (QThread, **paralelo 8 threads**): consulta `composicionSaldoProveedor` por cada CUIT; auto-elimina proveedores sin saldo pendiente; guarda cache con TTL 15 min
+4. `_PrecargarWorker` (QThread, **paralelo 8 threads**): consulta retenciones, ratios FC, cotización dólar. Reutiliza el cache de saldos del paso anterior
+5. `_construir_ops()` → arma `OpPago[]` con cheques fraccionados y retenciones calculadas
+6. `_manejar_overflow()` → diálogo para asignar chequera alternativa si se excede el límite
+7. `_asignar_numeros_op()` → calcula `numero_comprobante_estimado`
 8. `PreviewDialog` → el usuario confirma
-9. `_ProcesarWorker` (QThread) → POST por cada OP → `ResultDialog`
-10. `_on_terminado` → actualiza automáticamente el ÚLTIMO Nº de la chequera principal en la UI
+9. `_ProcesarWorker` (QThread, **serial intencionalmente**): POST por cada OP → `ResultDialog`
+10. `_on_terminado` → actualiza ÚLTIMO Nº de la chequera principal
 
 ---
 
@@ -76,13 +110,32 @@ tests/
 | `GET /oauth/token` | Bearer token (UUID en texto plano, no JSON) |
 | `POST /ordenPago` | Crea la OP |
 | `GET /proveedor/{cuit}` | Percepciones del proveedor |
-| `GET /retencion/{codigo}` | Tramos de retención (escala Ganancias) |
+| `GET /retencion/{codigo}` | Tramos de retención |
 | `GET /facturaCompra/{doc}` | Ratio gravado/total de la FC |
 | `GET /reports/analisisRetencion` | Histórico del mes (ISAR + ya retenido) |
 | `GET /reports/MONEDACOTIZACION` | Cotización dólar |
 | `GET /Talonario/list` | Lista de chequeras activas |
-| `GET /Talonario/{codigo}` | Detalle de chequera y talonario OP (`NumeroActual`, `LimiteHasta`) |
-| `GET /reports/composicionSaldoProveedor?PARAMWEBREPORT_fecha=...&PARAMWEBREPORT_organizacion={cuit}&PARAMWEBREPORT_cuenta=02.01.01.01.0001` | Documentos con saldo pendiente de un proveedor (filtrado a cuenta proveedores) |
+| `GET /Talonario/{codigo}` | Detalle de chequera (`NumeroActual`, `LimiteHasta`) |
+| `GET /reports/composicionSaldoProveedor?PARAMWEBREPORT_fecha=...&PARAMWEBREPORT_organizacion={cuit}&PARAMWEBREPORT_cuenta=02.01.01.01.0001` | Documentos con saldo pendiente |
+| `GET /empresa/list` | Lista de empresas (**devuelve `EMPRESA_EMPRE01`**; el POST espera `EMPRE01`) |
+
+---
+
+## Columnas requeridas en el Excel
+
+El Excel debe tener una hoja llamada **"DM"** con estas columnas (case-insensitive, los headers se detectan automáticamente):
+
+| Header en Excel | Uso |
+|---|---|
+| **Documento** | Ej. `FC - 21562`, `PAGO - 14062`, `MOVFONDOS - 10845` |
+| **Proveedor** | Nombre del proveedor (fallback si no hay CUIT) |
+| **CUIT** | CUIT del proveedor (con o sin guiones; se normaliza) |
+| **Comprobante** | Ej. `A-0007-00000004` |
+| **Importe** (o "Importe ppal") | Signo respeta convención Finnegans (negativo=adeuda, positivo=crédito) |
+| **Forma de pago** (también acepta "PAGO" o "Condicionpago") | Ej. `transferencia`, `Ch 08/05 - 15/05`, etc. |
+| **Fecha vto** | Opcional, fallback si no hay fechas parseables en Forma de pago |
+
+Filas válidas: las pintadas de **amarillo**. El resto se ignora.
 
 ---
 
@@ -90,119 +143,146 @@ tests/
 
 | ID | Descripción |
 |---|---|
-| A1 | CUIT validado antes de cada OP (no vacío, sin letras) |
-| A2 | Documentos ya pagados omitidos via `composicionSaldoProveedor` (fail-open si la API falla) |
-| A3 | Total de la OP > 0 (NCs que anulan todo se omiten con advertencia) |
-| A4 | Agrupación por CUIT en `dm_reader.py` (mismo CUIT = mismo proveedor) |
+| A1 | CUIT validado antes de cada OP (11 dígitos numéricos) |
+| A2 | Documentos ya pagados omitidos via `composicionSaldoProveedor`; **PAGO - bypasea este filtro** (es un crédito, no un pago) |
+| A3 | Total de la OP > 0 |
+| A4 | Agrupación por CUIT en `dm_reader.py` |
 | A5 | Validación de existencia de hoja "DM" con mensaje descriptivo |
-| A6 | Validación de config con `missing_fields()` (indica exactamente qué campo falta) |
-| Fase 2a | Inferencia de año en fechas de cheques (si cae antes de la emisión → año siguiente) |
-| Fase 2b | Aviso si cotización dólar no está configurada y la API falló |
-| Fase 2c | Auto-actualización de ÚLTIMO Nº en chequera principal al terminar |
-| Fase 2d | Aviso cuando cheques emitidos superan el límite de la chequera |
-| Fase 2e | Soporte multi-chequera: diálogo para asignar chequera alternativa si se excede el límite |
-| Fase 3 | Log persistente JSONL de payloads enviados y respuestas recibidas para auditoría/debug |
-| UI | Eliminación múltiple de pagos con checkboxes, seleccionar todos y confirmación |
-| UI | Verificación de saldo con modal bloqueante al cargar Excel; proveedores sin saldo se eliminan automáticamente |
-| UI | Preview profesional con resumen bruto/retenciones/neto, tarjetas por proveedor y OP prevista |
-| UI | Resultado final con highlight de errores/desvíos, footer de resumen y CSV enriquecido |
+| A6 | Validación de config con `missing_fields()` |
+| A7 | Sanitización de `EmpresaCodigo` quitando prefijo `EMPRESA_` (fix bug C2, ver abajo) |
+| A8 | Tolerancia a typos en "transferencia" + aviso al usuario para que corrija el Excel |
+| Fase 2a | Inferencia de año en fechas de cheques |
+| Fase 2b | Aviso si cotización dólar no está configurada |
+| Fase 2c | Auto-actualización de ÚLTIMO Nº al terminar |
+| Fase 2d-e | Soporte multi-chequera con overflow |
+| Fase 3 | Log persistente JSONL de request/response Finnegans |
 
 ---
 
 ## Detalles técnicos importantes
 
-### Retenciones de Ganancias
-- `ISAR` en el POST = base imponible de la OP actual (porción gravada de las FCs)
-- `ISARAcumulado` en el POST = histórico del mes + base imponible de esta OP
-- `Fecha` en el POST = fecha de la OP
-- Fórmula: `retencion_bruta = escala(isar_historico + base_actual)` → `retencion_final = max(0, retencion_bruta - ya_retenido_mes)`
+### Créditos (PAGO -, NC, MOVFONDOS positivo)
+
+Los créditos reducen el bruto **antes** de calcular retenciones y **antes** de fraccionar los cheques. Flujo:
+
+1. `bruto_fc = sum(items con importe > 0 que son FCs)`
+2. `credito_total = sum(items con importe < 0)` (ya negativo)
+3. `base_imponible_neta = base_imponible_bruta × (neto / bruto_fc)` ← base reducida proporcionalmente
+4. `retenciones = escala(base_imponible_neta)`
+5. `total_cheques = bruto + credito_total` (créditos negativos restan)
+6. `neto_final = total_cheques - retenciones`
+
+En el CtaCte del POST:
+- Items pagables (FC, ND, MOVFONDOS negativo) → `DebeHaber: 1`, importe positivo (Debe)
+- Items crédito (PAGO -, NC, MOVFONDOS positivo) → `DebeHaber: -1`, importe positivo abs() (Haber)
+
+Finnegans **rechaza** `ImporteMonTransaccion` negativo en CtaCte, por eso se invierte `DebeHaber`.
 
 ### Fraccionamiento de cheques
-- MOVFONDOS / NCCPRA / NDCPRA → siempre 1 cheque por importe completo
-- FC con fechas en col L → N cheques según las fechas parseadas
-- Si múltiples FCs del mismo proveedor tienen exactamente las mismas fechas → se consolidan en N cheques sobre el total (no N cheques por FC)
 
-### Detección de pagos duplicados
-- Se usa `composicionSaldoProveedor` por CUIT (no por comprobante)
-- Devuelve solo documentos con saldo pendiente; los ausentes están totalmente pagados
-- Permite pagos parciales sin bloquear el resto de los documentos del proveedor
+La cantidad de cheques sale de la **columna "Forma de pago"**, no del prefijo del documento:
+- `Ch 08/06 - 09/06 - 18/06` → 3 cheques
+- `Ch 15/05` → 1 cheque
+- `transferencia` (sin fechas) → 1 entrada de banco con el neto
+- Sin contenido parseable → 1 cheque con `fecha_vto` como fallback
+
+Para FCs del mismo proveedor con fechas **idénticas** se consolida en un solo set de N cheques sobre el total (no N cheques por FC). Para fechas distintas, cada FC se fracciona por separado.
+
+### Retenciones de Ganancias
+
+- `ISAR` en el POST = base imponible de la OP actual (porción gravada × ratio FC × factor por créditos)
+- `ISARAcumulado` = histórico del mes + base imponible actual
+- Fórmula: `retencion_bruta = escala(isar_acumulado)` → `retencion_final = max(0, retencion_bruta - ya_retenido_mes)`
+
+### Tolerancia a typos en "transferencia"
+
+`parser_pago.es_transferencia()` usa fuzzy match con `difflib.SequenceMatcher` (threshold 0.80):
+- Aceptados: `transferencia`, `tranferencia`, `transferensia`, `trnasferencia`, `Transferenc`, `transferenia`, etc.
+- Rechazados: `tarjeta`, `efectivo`, `Ch 08/05`, `Cheque`, `mercado pago` (todos quedan en <0.40)
+
+Si se detecta un typo, `clasificador.clasificar()` agrega un mensaje a `proveedor.avisos[]`. Al cargar el Excel, `main_window` muestra un `QMessageBox.warning` con todos los avisos para que el usuario corrija el archivo.
+
+### Sanitización de EmpresaCodigo
+
+`/empresa/list` devuelve el código con prefijo `EMPRESA_EMPRE01` (formato interno de Finnegans), pero el POST de OPs espera el código de negocio limpio `EMPRE01`. Sin sanitizar, Finnegans no resolvía la empresa y devolvía: *"El usuario solo tiene permisos de consulta sobre esta empresa"*.
+
+Fix defensivo en dos lugares:
+- `settings_dialog.py:_on_empresas_listas` strippea el prefijo al cargar la lista y al leer el valor guardado (compat con configs viciados)
+- `mapper.py:_empresa_codigo_limpio()` sanitiza justo antes de serializar el POST (defensa en profundidad)
+
+### Cache de saldos pendientes (TTL 15 min)
+
+`_SaldoCheckerWorker` guarda los resultados en `self._cache_docs` con timestamp `_cache_docs_ts`. Cuando el usuario hace "Procesar" dentro de 15 min, `_PrecargarWorker` reutiliza el cache en vez de re-consultar Finnegans. Ahorra ~10 s en la segunda corrida.
+
+### Paralelización HTTP
+
+- `_PrecargarWorker` y `_SaldoCheckerWorker` usan `ThreadPoolExecutor(max_workers=8)` para paralelizar consultas a Finnegans
+- Diccionarios compartidos (`codigos_ret_cargados`, `ratios_fc`) protegidos con `threading.Lock` en patrón check-then-set
+- `_ProcesarWorker` (POSTs de OP) **sigue siendo serial** intencionalmente, porque `NumeroComprobante` viene secuencial de Finnegans y paralelizar podría romper el orden
 
 ### NoScrollComboBox
-- Subclase de `QComboBox` definida en `theme.py`
-- Overridea `wheelEvent` con `event.ignore()` para evitar cambios accidentales con la rueda del mouse
-- Usada en: chequera principal (`main_window.py`), chequera alternativa overflow, y todos los combos de `settings_dialog.py`
 
-### EmpresaCodigo dinámico (bug C1 — corregido 2026-05-15)
-- `EMPRESA_CODIGO = "EMPRE01"` hardcodeado en `mapper.py` fue eliminado
-- `OpPago` ahora tiene campo `empresa_codigo: str = "EMPRE01"` (default para retrocompatibilidad)
-- `_construir_ops()` y `_manejar_overflow()` pasan `self._cfg.get("empresa_codigo", "EMPRE01")`
-- `armar_post()` usa `op.empresa_codigo` → el POST respeta lo configurado en Ajustes
+Subclase de `QComboBox` definida en `theme.py`. Overridea `wheelEvent` con `event.ignore()` para evitar cambios accidentales con la rueda del mouse.
 
-### Precisión Decimal en retenciones (bug B4 — corregido 2026-05-15)
-- `retenciones.py` almacena `Importe`, `ISAR`, `ISARAcumulado` e históricos como `Decimal` (no `float`)
-- `mapper.py` convierte a `float` al armar el payload JSON → sin pérdida de precisión en cálculos intermedios
-- `total_ret` en transferencias suma Decimals directamente en lugar de reconstruir desde `str(float)`
+---
 
-### Detección de cheques sin espacio (bug B1 — corregido 2026-05-15)
-- `es_cheque()` en `parser_pago.py` usaba `"ch " in t` (requería espacio) — no detectaba `"ch08/05"`
-- Reemplazado por `re.search(r"\bch\s*\d", t)` → detecta con o sin espacio, tabulación, mayúsculas
+## Bugs corregidos (historial)
 
-### Robustez de precarga (bug A3 — corregido 2026-05-15)
-- `_PrecargarWorker` tenía `except Exception: pass` en dos niveles: loop de proveedor y bloque analisisRetencion
-- Ahora loggea con `_LOG.warning(...)` y emite `progreso` con mensaje `⚠` visible en la UI
-- El usuario ve qué proveedor falló en lugar de proceder silenciosamente sin retenciones
-
-### Match de proveedor por CUIT (bug A4 — corregido 2026-05-15)
-- `_actualizar_estados_post_precarga()` matcheaba proveedor por nombre (columna 1) — frágil con homónimos
-- Ahora lee CUIT de columna 2 y matchea por `p.cuit == cuit`
-
-### Otros fixes menores (2026-05-15)
-- `endpoints.py`: método `talonario()` duplicado eliminado; filtro `PARAMWEBREPORT_cuenta=02.01.01.01.0001` en `composicionSaldoProveedor`
-- `clasificador.py`: `motivo_manual` usa `sorted(set)` para orden determinístico en mensaje de modalidad mixta
-- `main_window.py`: `_saldo_checker.wait(5000)` con timeout de 5s para evitar freeze de UI
-- `parser_pago.py`: 2 tests nuevos para `es_cheque` sin espacio
+| ID | Descripción | Estado |
+|---|---|---|
+| A3 | `_PrecargarWorker` con `except Exception: pass` silencioso → ahora loggea y emite progreso visible | ✅ |
+| A4 | Match de proveedor por nombre frágil con homónimos → ahora por CUIT | ✅ |
+| B1 | `es_cheque` requería espacio (`"ch "`) → ahora regex `\bch\s*\d` | ✅ |
+| B4 | Precisión `float` en retenciones → ahora `Decimal` en todo el dominio | ✅ |
+| C1 | `EmpresaCodigo` hardcodeado en mapper → ahora `OpPago.empresa_codigo` configurable | ✅ |
+| C2 | `EmpresaCodigo` con prefijo `EMPRESA_` desde `/empresa/list` rompía el POST → sanitización en mapper + settings_dialog | ✅ |
+| D1 | Retenciones se calculaban sobre el bruto sin considerar créditos → ahora base se reduce proporcionalmente | ✅ |
+| D2 | Créditos se aplicaban al último cheque post-hoc → ahora se restan del bruto antes de fraccionar | ✅ |
+| D3 | `ImporteMonTransaccion` negativo en CtaCte rechazado por Finnegans → ahora `DebeHaber=-1` con importe absoluto | ✅ |
+| E1 | Comparación OP prevista vs OP real generaba falsos warnings ("PAGO - 14062" ≠ "OP-0004-...") → columna eliminada | ✅ |
 
 ---
 
 ## Estado del repositorio
 
 - GitHub: https://github.com/AdministracionCimal/generador-pagos.git (rama `master`)
-- Tests: 56 pasando (`pytest tests/`); 2 errores pre-existentes de permisos en audit tests (no relacionados)
-- Build: `dist/GeneradorDePagos.exe` se recompila después de cada cambio funcional o visual.
+- Tests: **76 pasando** (`pytest tests/`); 2 errores pre-existentes de permisos en `test_audit_log.py` y `test_client_audit.py` (no relacionados, son problema de filesystem)
+- Build: `dist/GeneradorDePagos.exe` (~56 MB) se recompila localmente con `python -m PyInstaller GeneradorDePagos.spec --noconfirm`
+- GitHub Actions: cada push a `master` dispara `.github/workflows/release.yml` → compila en `windows-latest` y publica el `.exe` al release `latest`
+- Link permanente de descarga: `https://github.com/AdministracionCimal/generador-pagos/releases/latest/download/GeneradorDePagos.exe`
 
 ---
 
-## Mejoras visuales por fases
+## Optimizaciones de performance (todas implementadas)
 
-- **Fase visual 1** completada (2026-05-14): pulido base de `src/ui/theme.py`.
-  - Paleta más sobria y profesional.
-  - Cards menos pesadas, radio de 8px, sin borde inferior decorativo.
-  - Botones sin gradientes fuertes; primario sólido y secundarios neutros.
-  - Tablas, headers, inputs, group boxes y badges más consistentes.
+| ID | Optimización | Estado |
+|---|---|---|
+| P1 | `ThreadPoolExecutor(8)` en `_PrecargarWorker` con `threading.Lock` | ✅ |
+| P2 | `ThreadPoolExecutor(8)` en `_SaldoCheckerWorker` con `as_completed` | ✅ |
+| P3 | Cache `_cache_docs` con TTL 15 min entre workers | ✅ |
+| P4 | `setUpdatesEnabled(False/True)` al poblar tabla | ✅ |
+| P5 | Debounce 150 ms (`QTimer.singleShot`) en campos chequera | ✅ |
+| P6 | `@functools.lru_cache(maxsize=512)` en `_fmt_money` | ✅ |
 
-- **Fase visual 2** completada (2026-05-14): pantalla principal más operativa.
-  - Barra de resumen con métricas: pagos listos, total listo, cheques previstos, carga manual, disponibles.
-  - Métricas se recalculan al cargar Excel, cambiar chequera, editar último/límite y eliminar pagos.
-  - Cards de archivo y chequera más compactas (una sola línea).
-  - Badge "Sin saldo" para proveedores ya pagados; se eliminan automáticamente con modal de carga.
+Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 
-- **Fase visual 3** completada (2026-05-15): `PreviewDialog` rediseñado.
-  - Barra de 4 KPIs: ÓRDENES / BRUTO / RETENCIONES / NETO A PAGAR.
-  - Cada tarjeta de proveedor muestra desglose BRUTO → RETENCIONES → NETO cuando aplica.
-  - Layout más compacto (márgenes, espaciados y alto de filas reducidos).
+---
 
-- **Fase visual 4** completada (2026-05-15): `ResultDialog` mejorado.
-  - Barra de 4 KPIs con importes: PROCESADAS OK / CON ERROR / DESVÍOS / TOTAL CONFIRMADO.
-  - Highlight de filas: rojo `#FEF2F2` para errores, amarillo `#FFFBEB` para desvíos (OP prevista ≠ real).
-  - Footer de resumen textual entre tabla y botones.
-  - CSV con headers en español, columna `Discrepancia` y fila `TOTALES` al final.
+## Mejoras visuales por fases (resumen)
 
-- **Fase visual 5** completada (2026-05-15): `SettingsDialog` reorganizado.
-  - 5 secciones: CONEXIÓN / EMPRESA Y BANCO / TALONARIOS / CUENTAS CONTABLES / OPERACIONES BANCARIAS.
-  - Botón "Probar conexión" en sección CONEXIÓN con feedback inline (llama `_fetch_token()`).
-  - "Cargar desde API" movido al área de acción global sobre las secciones.
-  - Tooltips en campos sensibles: URL, Client ID, Client Secret, Código banco, Talonario OP.
-  - Scroll area para las secciones; diálogo de tamaño fijo 640×700.
-  - Fondo negro entre secciones corregido (`background-color` explícito en `QGroupBox::title` y widget contenedor).
-  - Flechas de combos corregidas: reemplazado CSS triangle trick por `chevron_down.svg`.
-  - `NoScrollComboBox` en todos los combos para evitar cambios accidentales con la rueda del mouse.
+- **Fase 1** (theme base): paleta sobria, cards de radio 8px, botones sin gradientes fuertes
+- **Fase 2** (main_window operativo): barra de métricas con pagos listos, total, cheques, manual, disponibles
+- **Fase 3** (PreviewDialog): 4 KPIs (ÓRDENES / BRUTO / RETENCIONES / NETO); tarjetas con desglose
+- **Fase 4** (ResultDialog): **simplificado** — 3 KPIs (PROCESADAS OK / CON ERROR / TOTAL); columna "Comparación" eliminada (Finnegans controla la numeración internamente); **export a Excel (.xlsx) en lugar de CSV** con headers en azul, filas de error en rojo, fila de total en azul suave
+- **Fase 5** (SettingsDialog): 5 secciones, "Probar conexión" inline, scroll area, tooltips
+- **Fase 6** (PreviewDialog y otros): fix de fondo negro entre secciones (`background-color` explícito en widget contenedor)
+
+---
+
+## Reglas críticas para futuras sesiones
+
+1. **No volver a usar prefijos para decidir crédito/pago** — el signo del importe es la única regla
+2. **No volver a calcular retenciones sobre el bruto** — siempre reducir por créditos primero
+3. **No volver a mandar `ImporteMonTransaccion` negativo** en CtaCte — usar `DebeHaber=-1` con valor absoluto
+4. **No paralelizar `_ProcesarWorker`** — los POST de OPs son serializados por diseño
+5. **No reagregar la columna "Comparación"** en ResultDialog — generaba falsos warnings
