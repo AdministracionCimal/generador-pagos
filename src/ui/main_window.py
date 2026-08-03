@@ -1482,3 +1482,18 @@ class MainWindow(QMainWindow):
         theme.show_animated(dlg)
         dlg.exec()
         self.statusBar().showMessage("Procesamiento terminado.")
+
+        # Si todos los pagos enviados salieron OK (ignorando manuales, que
+        # ya estaban aparte), limpiar Excel y tabla para evitar reenvío.
+        if resultados and all(r.get("estado") == "OK" for r in resultados):
+            self._limpiar_tras_envio_exitoso()
+
+    def _limpiar_tras_envio_exitoso(self) -> None:
+        self._proveedores = []
+        self._ops_a_procesar = []
+        self._lbl_archivo.setText("Sin archivo cargado")
+        self._lbl_archivo.setObjectName("Muted")
+        self._lbl_archivo.style().unpolish(self._lbl_archivo)
+        self._lbl_archivo.style().polish(self._lbl_archivo)
+        self._poblar_tabla()
+        self.statusBar().showMessage("Procesamiento terminado. Excel limpiado.", 5000)

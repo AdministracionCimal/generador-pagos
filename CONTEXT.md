@@ -39,10 +39,10 @@ src/
     audit.py              ← log persistente JSONL de request/response Finnegans
   ui/
     main_window.py        ← ventana principal, worker threads paralelos
-    preview_dialog.py     ← resumen antes de confirmar
+    preview_dialog.py     ← resumen antes de confirmar; fechas de cheque editables + alerta naranja
     result_dialog.py      ← resultados después de procesar (export a Excel)
     settings_dialog.py    ← configuración (sanitiza prefijo EMPRESA_)
-    theme.py              ← estilos visuales + NoScrollComboBox
+    theme.py              ← estilos visuales + NoScrollComboBox + NoScrollDateEdit
     icons/
       chevron_down.svg
       chevron_right.svg
@@ -97,9 +97,9 @@ La única regla de validez es: **fila pintada de amarillo + documento no vacío 
 5. `_construir_ops()` → arma `OpPago[]` con cheques fraccionados y retenciones calculadas
 6. `_manejar_overflow()` → diálogo para asignar chequera alternativa si se excede el límite
 7. `_asignar_numeros_op()` → calcula `numero_comprobante_estimado`
-8. `PreviewDialog` → el usuario confirma
+8. `PreviewDialog` → el usuario confirma; puede **editar la fecha de vencimiento de cada cheque** in-line (mutación directa sobre `ChequeEmitido.fecha_vencimiento`, que llega al POST sin pasos extra). Filas con fecha < hoy o > hoy + 180 días se pintan de naranja y aparece un banner con el conteo
 9. `_ProcesarWorker` (QThread, **serial intencionalmente**): POST por cada OP → `ResultDialog`
-10. `_on_terminado` → actualiza ÚLTIMO Nº de la chequera principal
+10. `_on_terminado` → actualiza ÚLTIMO Nº de la chequera principal. Si **todos** los resultados fueron OK, `_limpiar_tras_envio_exitoso` vacía `_proveedores`, `_ops_a_procesar`, restaura el label del archivo y repuebla la tabla vacía (evita reenvíos accidentales)
 
 ---
 
@@ -220,9 +220,32 @@ Fix defensivo en dos lugares:
 - Diccionarios compartidos (`codigos_ret_cargados`, `ratios_fc`) protegidos con `threading.Lock` en patrón check-then-set
 - `_ProcesarWorker` (POSTs de OP) **sigue siendo serial** intencionalmente, porque `NumeroComprobante` viene secuencial de Finnegans y paralelizar podría romper el orden
 
-### NoScrollComboBox
+### NoScrollComboBox / NoScrollDateEdit
 
-Subclase de `QComboBox` definida en `theme.py`. Overridea `wheelEvent` con `event.ignore()` para evitar cambios accidentales con la rueda del mouse.
+Subclases de `QComboBox` y `QDateEdit` definidas en `theme.py`. Overridean `wheelEvent` con `event.ignore()` para evitar cambios accidentales con la rueda del mouse. Ambas comparten el mismo patrón — cada selector interactivo que exponga la app debería usar la variante `NoScroll*` correspondiente.
+
+### Alerta de cheques con fecha fuera de rango (PreviewDialog)
+
+Motivación: cheque emitido a **06/05/2027** cuando se quiso poner 06/06/2026 (typo de día). Como el parser infiere el año siguiente cuando la fecha ya pasó respecto de hoy, un tipeo en el día terminó mandando el cheque casi un año hacia adelante. La alerta previa al envío atrapa este tipo de error.
+
+- Constante `ALERTA_FUTURO_DIAS = 180` en `preview_dialog.py`
+- Motivo se calcula por cheque: `< hoy` → `"anterior a hoy"`; `> hoy + 180 días` → `"a más de 180 días"`; en rango → `None`
+- Fila pintada de naranja (`#FFE2C4` / borde `#E08A2B` / texto `#7A3E00`) cuando el motivo no es `None`
+- `QDateEdit` (variante `NoScrollDateEdit`) en la columna "Vencimiento" con `setCalendarPopup(True)` y formato `dd/MM/yyyy`
+- Ancho de la columna fijado a 140 px (`ResizeMode.Fixed`) porque `ResizeToContents` no respeta el `sizeHint` de un `cellWidget`
+- Banner superior con conteo total de cheques en alerta que se refresca en vivo al editar
+- Al editar la fecha, `_on_cheque_date_changed` muta `ChequeEmitido.fecha_vencimiento` directamente — `_ProcesarWorker` recibe la misma referencia y el POST envía el valor corregido
+
+### Auto-limpieza tras envío exitoso
+
+Después de que `ResultDialog` se cierra, si `all(r["estado"] == "OK" for r in resultados)`:
+
+- `_proveedores` y `_ops_a_procesar` se vacían
+- `_lbl_archivo` vuelve a `"Sin archivo cargado"` con objectName `"Muted"`
+- `_poblar_tabla()` repinta la tabla vacía y actualiza los KPIs a cero
+- Status bar muestra `"Procesamiento terminado. Excel limpiado."` durante 5 s
+
+Si al menos un resultado no fue `"OK"`, el estado se conserva para reintento manual. Los proveedores en modalidad `MANUAL` no cuentan para la decisión — sólo los resultados del POST real.
 
 ---
 
@@ -286,3 +309,6 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 3. **No volver a mandar `ImporteMonTransaccion` negativo** en CtaCte — usar `DebeHaber=-1` con valor absoluto
 4. **No paralelizar `_ProcesarWorker`** — los POST de OPs son serializados por diseño
 5. **No reagregar la columna "Comparación"** en ResultDialog — generaba falsos warnings
+6. **La alerta de fechas de cheque tiene que ser bidireccional** — flag para `< hoy` **y** `> hoy + 180 días`. El parser de fechas infiere el año siguiente cuando la fecha ya pasó, así que un typo en el día se manifiesta como fecha muy futura, no como fecha atrasada
+7. **Todo QDateEdit interactivo debe ignorar la rueda del mouse** — usar `NoScrollDateEdit` (mismo patrón que `NoScrollComboBox`); si no, un scroll accidental cambia el valor
+8. **Después de recompilar el `.exe` verificar el `LastWriteTime` real del binario** — los mensajes de éxito de PyInstaller pueden reportar OK sin haber actualizado el archivo en disco (proceso viejo bloqueando, cache raro). Comparar contra `Get-Date` antes de darlo por cerrado

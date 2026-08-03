@@ -1,5 +1,13 @@
 """Dialogo de verificacion previo al envio a Finnegans."""
-from PyQt6.QtCore import Qt
+from datetime import date, timedelta
+
+# Umbral para flaggear cheques con fecha sospechosa hacia el futuro.
+# Caso real: typo en el día (06/05 en lugar de 06/06) hace que el parser
+# infiera año siguiente y el cheque salga a ~1 año en lugar de ~1 mes.
+ALERTA_FUTURO_DIAS = 180
+
+from PyQt6.QtCore import QDate, Qt
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -16,8 +24,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.domain.models import Modalidad, OpPago, ProveedorTanda
+from src.domain.models import ChequeEmitido, Modalidad, OpPago, ProveedorTanda
 from src.ui import theme
+
+
+# Naranja para cheques con fecha fuera del rango razonable
+# (anterior a hoy, o demasiado lejana hacia el futuro).
+ALERTA_BG     = "#FFE2C4"
+ALERTA_BORDER = "#E08A2B"
+ALERTA_FG     = "#7A3E00"
 
 
 def _fmt(importe: float) -> str:
@@ -45,6 +60,14 @@ class PreviewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Verificacion previa al envio")
         self.resize(980, 680)
+
+        # Mutamos los ChequeEmitido en vivo cuando el usuario edita una fecha.
+        # _ProcesarWorker recibe las mismas referencias, así que el POST toma
+        # el valor actualizado sin pasos extra.
+        self._today = date.today()
+        self._cheque_rows: list[dict] = []  # {cheque, table, row, date_edit, items}
+        self._warn_banner: QFrame | None = None
+        self._warn_label: QLabel | None = None
 
         total_ops   = len(ops)
         total_bruto = sum(float(op.proveedor.importe_total) for op in ops)
@@ -74,6 +97,8 @@ class PreviewDialog(QDialog):
         manual_card = None
         if manuales:
             manual_card = self._build_manual_card(manuales)
+
+        self._warn_banner = self._build_warn_banner()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -107,10 +132,15 @@ class PreviewDialog(QDialog):
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addWidget(stats_bar)
+        if self._warn_banner is not None:
+            layout.addWidget(self._warn_banner)
         if manual_card is not None:
             layout.addWidget(manual_card)
         layout.addWidget(scroll, stretch=1)
         layout.addWidget(buttons)
+
+        # Pintar filas con cheques fuera de rango después de que las tablas existan.
+        self._refresh_alertas()
 
     def _build_stats_bar(self, stats: list[tuple[str, str, str]]) -> QFrame:
         bar = QFrame()
@@ -316,18 +346,177 @@ class PreviewDialog(QDialog):
 
     def _build_payment_table(self, op: OpPago) -> QTableWidget:
         if op.cheques:
-            headers = ["Numero", "Vencimiento", "Importe"]
-            rows = [
-                [ch.numero, ch.fecha_vencimiento.strftime("%d/%m/%Y"), _fmt(float(ch.importe))]
-                for ch in op.cheques
-            ]
-            return self._build_table(headers, rows, right_align_cols={2})
+            return self._build_cheques_table(op)
 
         return self._build_table(
             ["Operacion", "Importe"],
             [["Transferencia por lote", _fmt(self._payment_total(op))]],
             right_align_cols={1},
         )
+
+    def _build_cheques_table(self, op: OpPago) -> QTableWidget:
+        headers = ["Numero", "Vencimiento", "Importe"]
+        rows = [
+            [ch.numero, "", _fmt(float(ch.importe))]
+            for ch in op.cheques
+        ]
+        table = self._build_table(headers, rows, right_align_cols={2})
+
+        # Vencimiento lleva un QDateEdit como cellWidget; ResizeToContents
+        # ignora su sizeHint, así que fijamos un ancho fijo para que entre
+        # "dd/MM/yyyy" + botón del calendario.
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        table.setColumnWidth(1, 140)
+        table.verticalHeader().setDefaultSectionSize(34)
+
+        for row_idx, ch in enumerate(op.cheques):
+            date_edit = theme.NoScrollDateEdit(QDate(ch.fecha_vencimiento.year,
+                                                     ch.fecha_vencimiento.month,
+                                                     ch.fecha_vencimiento.day))
+            date_edit.setDisplayFormat("dd/MM/yyyy")
+            date_edit.setCalendarPopup(True)
+            date_edit.setStyleSheet(self._date_edit_qss(alerta=False))
+            date_edit.setMinimumWidth(130)
+            date_edit.setProperty("alerta", None)  # fuerza primer repintado
+            date_edit.dateChanged.connect(
+                lambda qd, c=ch: self._on_cheque_date_changed(c, qd)
+            )
+            table.setCellWidget(row_idx, 1, date_edit)
+
+            item_numero = table.item(row_idx, 0)
+            item_importe = table.item(row_idx, 2)
+            self._cheque_rows.append({
+                "cheque": ch,
+                "table": table,
+                "row": row_idx,
+                "date_edit": date_edit,
+                "items": [item_numero, item_importe],
+            })
+
+        return table
+
+    def _on_cheque_date_changed(self, ch: ChequeEmitido, qd: QDate) -> None:
+        nueva = date(qd.year(), qd.month(), qd.day())
+        if nueva == ch.fecha_vencimiento:
+            return
+        ch.fecha_vencimiento = nueva
+        self._refresh_alertas()
+
+    def _motivo_alerta(self, fecha: date) -> str | None:
+        """Retorna el motivo si la fecha está fuera de rango razonable, o None.
+        Un cheque debe ser diferido (mañana en adelante): el banco no acepta
+        una fecha igual o anterior al día actual."""
+        if fecha < self._today:
+            return "anterior a hoy"
+        if fecha == self._today:
+            return "de hoy (el banco solo acepta cheques diferidos)"
+        if fecha > self._today + timedelta(days=ALERTA_FUTURO_DIAS):
+            return f"a más de {ALERTA_FUTURO_DIAS} días"
+        return None
+
+    def _refresh_alertas(self) -> None:
+        alertas = 0
+        for info in self._cheque_rows:
+            motivo = self._motivo_alerta(info["cheque"].fecha_vencimiento)
+            if motivo is not None:
+                alertas += 1
+            self._paint_cheque_row(info, motivo)
+        self._update_warn_banner(alertas)
+
+    def _paint_cheque_row(self, info: dict, motivo: str | None) -> None:
+        en_alerta = motivo is not None
+        bg = QBrush(QColor(ALERTA_BG)) if en_alerta else QBrush(Qt.GlobalColor.transparent)
+        for item in info["items"]:
+            if item is not None:
+                item.setBackground(bg)
+                fg = QColor(ALERTA_FG) if en_alerta else QColor(theme.TEXT_PRIMARY)
+                item.setForeground(QBrush(fg))
+
+        date_edit = info["date_edit"]
+        if date_edit.property("alerta") == en_alerta:
+            # El estilo no cambia, pero sí puede haber cambiado el motivo en el tooltip.
+            date_edit.setToolTip(
+                f"Fecha {motivo}. Hacé clic para corregir." if en_alerta else ""
+            )
+            return
+        date_edit.setProperty("alerta", en_alerta)
+        date_edit.setStyleSheet(self._date_edit_qss(alerta=en_alerta))
+        date_edit.setToolTip(
+            f"Fecha {motivo}. Hacé clic para corregir." if en_alerta else ""
+        )
+
+    @staticmethod
+    def _date_edit_qss(alerta: bool) -> str:
+        if alerta:
+            bg, fg, border = ALERTA_BG, ALERTA_FG, ALERTA_BORDER
+        else:
+            bg, fg, border = theme.BG_SURFACE, theme.TEXT_PRIMARY, theme.BORDER
+        return (
+            f"QDateEdit {{"
+            f"  background-color: {bg};"
+            f"  color: {fg};"
+            f"  border: 1px solid {border};"
+            f"  border-radius: 4px;"
+            f"  padding: 2px 4px;"
+            f"  font-size: 13px;"
+            f"  font-weight: 600;"
+            f"}}"
+            f"QDateEdit:hover {{ border: 1px solid {theme.BORDER_STRONG}; }}"
+            f"QDateEdit:focus {{ border: 1px solid {theme.BRAND}; }}"
+            f"QDateEdit QLineEdit {{"
+            f"  background: transparent;"
+            f"  color: {fg};"
+            f"  border: none;"
+            f"  padding: 0;"
+            f"  selection-background-color: {theme.BRAND};"
+            f"  selection-color: {theme.BG_SURFACE};"
+            f"}}"
+            f"QDateEdit::drop-down {{"
+            f"  subcontrol-origin: padding;"
+            f"  subcontrol-position: top right;"
+            f"  width: 18px;"
+            f"  border: none;"
+            f"}}"
+        )
+
+    def _build_warn_banner(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("Card")
+        card.setStyleSheet(
+            f"QFrame#Card {{"
+            f"  background-color: {ALERTA_BG};"
+            f"  border: 1px solid {ALERTA_BORDER};"
+            f"  border-radius: 8px;"
+            f"}}"
+        )
+        row = QHBoxLayout(card)
+        row.setContentsMargins(18, 12, 18, 12)
+        row.setSpacing(12)
+
+        row.addWidget(theme.make_badge("Cheques con fecha sospechosa", "warning"))
+
+        self._warn_label = QLabel("")
+        self._warn_label.setStyleSheet(f"color: {ALERTA_FG}; font-weight: 600;")
+        self._warn_label.setWordWrap(True)
+        row.addWidget(self._warn_label, stretch=1)
+
+        card.setVisible(False)
+        return card
+
+    def _update_warn_banner(self, alertas: int) -> None:
+        if self._warn_banner is None or self._warn_label is None:
+            return
+        if alertas <= 0:
+            self._warn_banner.setVisible(False)
+            return
+        plural = "cheque" if alertas == 1 else "cheques"
+        self._warn_label.setText(
+            f"Hay {alertas} {plural} con fecha fuera del rango razonable "
+            f"(hoy {self._today.strftime('%d/%m/%Y')} o antes — el banco solo "
+            f"acepta cheques diferidos — o a más de {ALERTA_FUTURO_DIAS} días). "
+            f"Revisalo antes de confirmar — el POST envía el valor que veas en la tabla."
+        )
+        self._warn_banner.setVisible(True)
 
     def _payment_total(self, op: OpPago) -> float:
         total_ret = sum(float(r.get("Importe", 0) or 0) for r in op.retenciones)

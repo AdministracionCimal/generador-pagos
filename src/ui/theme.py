@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PyQt6.QtWidgets import QComboBox, QDateEdit, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 # ── Icon paths ────────────────────────────────────────────────────────────
 _ICONS_DIR     = Path(__file__).parent / "icons"
@@ -371,6 +371,12 @@ def show_animated(dialog, duration: int = 160) -> None:
 
 class NoScrollComboBox(QComboBox):
     """QComboBox que ignora el scroll del mouse para evitar cambios accidentales."""
+    def wheelEvent(self, event):          # noqa: N802
+        event.ignore()
+
+
+class NoScrollDateEdit(QDateEdit):
+    """QDateEdit que ignora el scroll del mouse para evitar cambios accidentales."""
     def wheelEvent(self, event):          # noqa: N802
         event.ignore()
 
