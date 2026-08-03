@@ -210,6 +210,18 @@ Para FCs del mismo proveedor con fechas **idénticas** se consolida en un solo s
 - `ISARAcumulado` = histórico del mes + base imponible actual
 - Fórmula: `retencion_bruta = escala(isar_acumulado)` → `retencion_final = max(0, retencion_bruta - ya_retenido_mes)`
 
+### Reconocimiento de «Forma de pago» (Fase 3)
+
+`es_cheque()` pide **palabra + número**:
+
+- `_RE_PALABRA_CHEQUE = \b(?:cheques|cheque|chq|ch)(?=\s|\.|\d|$)`. El lookahead es lo que evita los falsos positivos: `chequera 12` no matchea, y `echeq` / `e-cheq` tampoco porque no hay `\b` antes de `cheq` (es otro instrumento: la app emite cheques físicos numerados)
+- después de la palabra tiene que haber un número pegado (`ch15/05`, `Ch 30 dias`) **o** una fecha `dd/mm` en cualquier parte del texto (`Cheque diferido 15/05`)
+- la palabra sola (`Cheque`, `Ch`) queda en MANUAL: no hay con qué armar el vencimiento
+
+`es_transferencia()` evalúa el texto completo **y además palabra por palabra** contra el umbral de similitud. Sin esto, `transferencia bancaria` quedaba en 0.74 y caía en MANUAL aunque la palabra clave estuviera bien escrita. Además: si el texto contiene la palabra cheque (`cheque o transferencia`), devuelve `False` a propósito — texto ambiguo no se adivina, queda MANUAL.
+
+`transferencia_con_typo()` no avisa por palabras de más: `transferencia bancaria` está bien escrito; `tranferencia bancaria` sí avisa.
+
 ### Tolerancia a typos en "transferencia"
 
 `parser_pago.es_transferencia()` usa fuzzy match con `difflib.SequenceMatcher` (threshold 0.80):
@@ -372,7 +384,8 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 13. **Los cortes de red no son errores de API** — `NetworkError` requiere verificación manual (`SIN CONFIRMACION`), no reintento automático
 14. **El «Documento» se normaliza una sola vez, en `dm_reader`** — nunca comparar `item.documento` crudo contra Finnegans ni reimplementar `_es_fc` local: usar `domain/documento.py`
 15. **Si una fila del Excel se descarta, tiene que quedar registrado en `avisos_out`** — los silencios en la lectura son la clase de bug más caro de esta app: nadie se entera hasta que falta un pago
-16. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
+16. **Ante una «Forma de pago» ambigua, MANUAL** — nunca adivinar entre cheque y transferencia (`cheque o transferencia` da `False` en las dos funciones). Al ampliar la tolerancia, agregar siempre los casos rechazados a los tests
+17. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
 
 ---
 
@@ -384,5 +397,5 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 | 1 | Riesgo de plata: reenvío duplicado, numeración de cheques, cortes de red | ✅ hecho |
 | 2 | Silencios en la lectura del Excel: amarillo de tema ignorado, `Documento` con formato distinto que descarta al proveedor como "sin saldo", fechas inexistentes (`Ch 31/02`), mensaje de encabezados fila 1, aviso de columna "importe" duplicada | ✅ hecho |
 | 2b | Fechas inexistentes (`Ch 31/02`): generan su cheque marcado en vez de desaparecer; alerta naranja editable y **bloqueo del envío** mientras quede una alerta (regla movida a `domain/alertas_cheque.py`); check para confirmar plazos de más de 180 días | ✅ hecho |
-| 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` caen en MANUAL | ⏳ pendiente |
+| 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` ya no caen en MANUAL; texto ambiguo sí | ✅ hecho |
 | 4 | Distribución: versión visible en el título, aviso de versión nueva, firma de código (compra) | ⏳ pendiente |

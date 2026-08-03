@@ -38,6 +38,16 @@ class TestClasificar:
         p = _proveedor("Tarjeta de Crédito")
         assert clasificar(p).modalidad == Modalidad.MANUAL
 
+    def test_palabra_cheque_completa(self):
+        p = _proveedor("Cheque 15/05", "Cheque diferido 22/05")
+        assert clasificar(p).modalidad == Modalidad.CHEQUE_PROPIO
+
+    def test_transferencia_con_palabras_de_mas(self):
+        p = _proveedor("transferencia bancaria", "Transferencia inmediata")
+        resultado = clasificar(p)
+        assert resultado.modalidad == Modalidad.TRANSFERENCIA
+        assert resultado.avisos == []      # no son typos, están bien escritas
+
     def test_sin_items_es_manual(self):
         p = ProveedorTanda(cuit="123", nombre="VACIO")
         assert clasificar(p).modalidad == Modalidad.MANUAL

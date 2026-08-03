@@ -92,6 +92,69 @@ class TestEsTransferencia:
         assert not transferencia_con_typo(otro)
 
 
+class TestToleranciaFormaDePago:
+    """Formas de pago que antes caían en carga manual por como estaban escritas."""
+
+    @pytest.mark.parametrize("texto", [
+        "Ch 15/05",                 # forma canónica
+        "ch15/05",                  # sin espacio
+        "Ch. 15/05",                # con punto
+        "CHQ 15/05",                # abreviatura
+        "Cheque 15/05",             # palabra completa
+        "cheques 15/05",            # plural
+        "Cheque diferido 15/05",    # palabras intercaladas
+        "Ch 08/06 - 09/06",         # varias fechas
+        "Ch 30 dias",               # número sin fecha → usa Fecha vto
+    ])
+    def test_cheque_reconocido(self, texto):
+        assert es_cheque(texto)
+
+    @pytest.mark.parametrize("texto", [
+        "Cheque",           # sin número: no hay con qué armar el vencimiento
+        "Ch",
+        "chequera 12",      # no es un cheque
+        "echeq 15/05",      # otro instrumento: la app emite cheques físicos
+        "e-cheq 15/05",
+        "transferencia",
+        "efectivo",
+        "",
+    ])
+    def test_no_es_cheque(self, texto):
+        assert not es_cheque(texto)
+
+    @pytest.mark.parametrize("texto", [
+        "transferencia bancaria",
+        "Transferencia inmediata",
+        "transf bancaria",
+        "transferencia interbancaria",
+        "transferencia 08/05",
+        "tranferencia bancaria",     # typo + palabra de más
+    ])
+    def test_transferencia_con_palabras_de_mas(self, texto):
+        assert es_transferencia(texto)
+
+    @pytest.mark.parametrize("texto", [
+        "trans",              # demasiado corto para asumir
+        "tarjeta",
+        "Tarjeta de Credito",
+        "efectivo",
+        "mercado pago",
+        "Ch 08/05",
+    ])
+    def test_no_es_transferencia(self, texto):
+        assert not es_transferencia(texto)
+
+    def test_texto_ambiguo_queda_manual(self):
+        """«cheque o transferencia» no se adivina: sin fecha no es cheque, y la
+        palabra cheque impide tomarlo como transferencia."""
+        assert not es_cheque("cheque o transferencia")
+        assert not es_transferencia("cheque o transferencia")
+
+    def test_palabras_de_mas_no_son_typo(self):
+        assert not transferencia_con_typo("transferencia bancaria")
+        assert transferencia_con_typo("tranferencia bancaria")
+
+
 class TestFechasDescartadas:
     def test_dia_inexistente_en_el_mes(self):
         assert fechas_descartadas("Ch 31/02", anio=2026) == ["31/02"]

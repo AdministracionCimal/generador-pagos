@@ -5,6 +5,12 @@ from difflib import SequenceMatcher
 
 _RE_FECHA = re.compile(r"(\d{1,2})/(\d{1,2})")
 
+# Palabra que identifica un cheque. El lookahead evita falsos positivos:
+# «chequera 12» no es un cheque, y «echeq» tampoco (no hay límite de palabra
+# antes de «cheq», así que ni entra).
+_RE_PALABRA_CHEQUE = re.compile(r"\b(?:cheques|cheque|chq|ch)(?=\s|\.|\d|$)")
+_RE_NUMERO_PEGADO  = re.compile(r"\s*\.?\s*\d")
+
 # Variantes exactas válidas para «transferencia»
 _TRANSFERENCIA_EXACTAS = {
     "transferencia",
@@ -86,8 +92,18 @@ def fechas_descartadas(texto: str, anio: int | None = None) -> list[str]:
 
 
 def es_cheque(texto: str) -> bool:
+    """True para «Ch 15/05», «ch15/05», «CHQ 15/05», «Cheque diferido 15/05».
+
+    Hace falta la palabra **y** un número: la palabra sola («Cheque», sin fecha)
+    queda en carga manual, porque no hay con qué armar el vencimiento.
+    """
     t = (texto or "").strip().lower()
-    return bool(re.search(r"\bch\s*\d", t))
+    match = _RE_PALABRA_CHEQUE.search(t)
+    if match is None:
+        return False
+    # Número pegado a la palabra («ch15/05», «Ch 1») o una fecha en cualquier
+    # parte del texto («Cheque diferido 15/05»).
+    return bool(_RE_NUMERO_PEGADO.match(t[match.end():])) or bool(_RE_FECHA.search(t))
 
 
 def _similitud_transferencia(texto: str) -> float:
@@ -97,18 +113,43 @@ def _similitud_transferencia(texto: str) -> float:
     return SequenceMatcher(None, t, "transferencia").ratio()
 
 
+def _palabras(texto: str) -> list[str]:
+    return [p.strip(",;:()") for p in texto.split()]
+
+
+def _es_palabra_transferencia(palabra: str) -> bool:
+    return (
+        palabra in _TRANSFERENCIA_EXACTAS
+        or _similitud_transferencia(palabra) >= _TRANSFERENCIA_THRESHOLD
+    )
+
+
 def es_transferencia(texto: str) -> bool:
-    """True si es transferencia exacta o un typo cercano (ej. «tranferencia»)."""
+    """True para «transferencia», typos cercanos («tranferencia») y frases que la
+    contienen («transferencia bancaria», «Transferencia inmediata»).
+
+    Se evalúa el texto completo y además palabra por palabra: si no fuera por
+    esto, «transferencia bancaria» quedaba en 0.74 de similitud y caía en carga
+    manual, aunque la palabra clave estuviera bien escrita.
+    """
     t = (texto or "").strip().lower()
-    if t in _TRANSFERENCIA_EXACTAS:
+    if not t:
+        return False
+    if t in _TRANSFERENCIA_EXACTAS or _similitud_transferencia(t) >= _TRANSFERENCIA_THRESHOLD:
         return True
-    return _similitud_transferencia(t) >= _TRANSFERENCIA_THRESHOLD
+    # Texto ambiguo («cheque o transferencia»): no adivinar, que quede manual.
+    if _RE_PALABRA_CHEQUE.search(t):
+        return False
+    return any(_es_palabra_transferencia(p) for p in _palabras(t))
 
 
 def transferencia_con_typo(texto: str) -> bool:
     """True si el texto se interpretó como transferencia pero está mal escrito.
-    Útil para avisar al usuario que corrija la ortografía en el Excel."""
+    Útil para avisar al usuario que corrija la ortografía en el Excel.
+
+    Palabras de más no son un typo: «transferencia bancaria» está bien escrito.
+    """
     t = (texto or "").strip().lower()
-    if not t or t in _TRANSFERENCIA_EXACTAS:
+    if not t or t in _TRANSFERENCIA_EXACTAS or not es_transferencia(t):
         return False
-    return _similitud_transferencia(t) >= _TRANSFERENCIA_THRESHOLD
+    return not any(p in _TRANSFERENCIA_EXACTAS for p in _palabras(t))

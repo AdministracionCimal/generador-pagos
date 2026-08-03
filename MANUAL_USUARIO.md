@@ -216,24 +216,40 @@ procesadas).
 Define **la modalidad** y **cuántos cheques** se emiten. No lo define el tipo de documento:
 un MOVFONDOS también puede pagarse en 3 cheques.
 
+**Para cheque** hace falta la palabra **y** el número:
+
 | Lo que se escribe | Resultado |
 |---|---|
 | `Ch 15/05` | 1 cheque al 15/05 |
 | `Ch 08/06 - 09/06 - 18/06` | 3 cheques, uno por fecha, importe dividido en partes iguales (el último absorbe los centavos) |
+| `ch15/05`, `Ch. 15/05`, `CHQ 15/05` | Igual que `Ch 15/05` |
+| `Cheque 15/05`, `cheques 15/05`, `Cheque diferido 15/05` | Igual: la palabra completa también se reconoce |
+
+**Para transferencia** alcanza con que la palabra esté (aunque haya otras):
+
+| Lo que se escribe | Resultado |
+|---|---|
 | `transferencia` | 1 transferencia por el neto |
 | `transf`, `transf.`, `transferencia interbancaria` | Igual que transferencia |
+| `transferencia bancaria`, `Transferencia inmediata`, `transf bancaria` | Igual que transferencia |
 | `tranferencia`, `transferensia`, `trnasferencia` | Se acepta como transferencia y **avisa del error de tipeo** |
-| Vacío o texto no reconocido | El proveedor queda en **Carga manual** |
 
-**Trampas reales, verificadas:**
+**Lo que queda en Carga manual (a propósito):**
+
+| Texto | Por qué |
+|---|---|
+| `Cheque`, `Ch` (sin número ni fecha) | No hay con qué armar el vencimiento |
+| `cheque o transferencia` | Ambiguo: la app **no adivina** entre una cosa y la otra |
+| `echeq 15/05`, `e-cheq 15/05` | Es otro instrumento; la app emite cheques físicos numerados de una chequera |
+| `trans` | Demasiado corto para asumir que quisiste decir transferencia |
+| `efectivo`, `mercado pago`, `tarjeta` | La app no los soporta |
+| `chequera 12` | No es una forma de pago |
+| Vacío | Sin dato |
+
+**Ojo con las fechas inexistentes:**
 
 | Texto | Qué pasa |
 |---|---|
-| `Cheque 15/05` | ❌ **No** se reconoce como cheque → Carga manual. Tiene que ser `Ch` seguido del número |
-| `transferencia bancaria` | ❌ No se reconoce → Carga manual |
-| `Transferencia inmediata` | ❌ No se reconoce → Carga manual |
-| `trans` | ❌ Demasiado corto → Carga manual |
-| `efectivo`, `mercado pago`, `tarjeta` | ❌ Carga manual (correcto: la app no los soporta) |
 | `Ch 31/02 - 10/06` | ⚠️ El 31/02 no existe. Igual salen **2 cheques**: el de la fecha mal escrita queda con fecha provisoria, marcado en naranja en la pantalla previa, y **la app no deja enviar hasta que le pongas la fecha correcta** |
 
 **Las fechas se escriben `dd/mm` sin año.** La app asume el año en curso y, si la fecha ya
@@ -475,7 +491,7 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 
 | Síntoma | Causa | Solución |
 |---|---|---|
-| Un proveedor quedó en Carga manual sin motivo aparente | Texto de forma de pago no reconocido (`Cheque 15/05`, `transferencia bancaria`) | Escribir `Ch dd/mm` o `transferencia` |
+| Un proveedor quedó en Carga manual sin motivo aparente | Texto de forma de pago no reconocido. Los casos y el por qué están en la sección 4.6 | El estado en la pantalla de resultados muestra el texto exacto que no se pudo interpretar |
 | “Modalidad mixta” | El proveedor mezcla cheque y transferencia | Unificar, o partir en dos tandas |
 | Salen menos cheques de los esperados | Falta alguna fecha en la columna Forma de pago | Revisar el texto: cada `dd/mm` genera un cheque |
 | Un cheque aparece en naranja diciendo que la fecha no existe | El Excel tenía `31/02` o similar | Poner la fecha correcta en la columna Vencimiento (el cheque no se pierde) |
