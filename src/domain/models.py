@@ -44,6 +44,9 @@ class ChequeEmitido:
     # `fecha_vencimiento` es provisoria: el usuario tiene que corregirla en la
     # pantalla previa y la app se niega a enviar el cheque hasta entonces.
     fecha_origen_invalida: str = ""
+    # El usuario confirmó en la pantalla previa que el plazo largo (más de
+    # ALERTA_FUTURO_DIAS) es correcto. Sólo levanta esa alerta, no las demás.
+    plazo_confirmado: bool = False
 
 
 @dataclass

@@ -375,15 +375,25 @@ retenciones calculadas, y arriba los totales **ÓRDENES / BRUTO / RETENCIONES / 
 **Cheques con la fecha en alerta:** las filas pintadas de **naranja** son cheques que la app
 **no va a enviar** así como están. Hay cuatro motivos:
 
-| Motivo | Por qué |
-|---|---|
-| La fecha del Excel no existe (`31/02`) | Nadie eligió el vencimiento: la app puso una provisoria |
-| Fecha anterior a hoy | El banco no la acepta |
-| Fecha de hoy | El banco sólo acepta cheques diferidos |
-| Fecha a más de 180 días | Suele ser un error de tipeo que corrió el año |
+| Motivo | Por qué | Cómo se resuelve |
+|---|---|---|
+| La fecha del Excel no existe (`31/02`) | Nadie eligió el vencimiento: la app puso una provisoria | Hay que **corregir la fecha** |
+| Fecha anterior a hoy | El banco no la acepta | Hay que **corregir la fecha** |
+| Fecha de hoy | El banco sólo acepta cheques diferidos | Hay que **corregir la fecha** |
+| Fecha a más de 180 días | Suele ser un error de tipeo que corrió el año | Se corrige **o se confirma** con el check (ver abajo) |
 
 Arriba aparece un cartel con el total de cheques en alerta, y **el botón “Confirmar y enviar”
 queda deshabilitado** mientras quede una sola sin resolver.
+
+**Cheques a más de 180 días que son correctos:** cuando hay alguno, en el cartel naranja
+aparece el check *“Confirmo que los cheques a más de 180 días están bien y se envían con esa
+fecha”*. Tildándolo se habilita el envío, y el motivo de la alerta te dice a cuántos días está
+cada uno (ej. *“fecha a 240 días”*) para que puedas distinguir un plazo real de un error de
+tipeo. El cartel queda visible mientras el check esté tildado, y se puede destildar para
+volver a revisarlos.
+
+Ese check **sólo levanta la alerta de plazo largo**. Una fecha inexistente, vencida o de hoy no
+se puede confirmar: hay que corregirla.
 
 La columna **Vencimiento es editable**: se hace clic, se corrige la fecha (o se usa el
 calendario) y el cambio **se manda así al sistema**. El cartel y el botón se actualizan en el
@@ -440,7 +450,7 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | **Proveedores omitidos** | CUIT inválido, sin saldo, importe cero | Revisar cada caso; esos pagos **no se enviaron** |
 | **Nada que procesar** | Ningún pago quedó en estado Listo | Revisar estados en la tabla |
 | **Último número de cheque distinto** | Finnegans informa otro último cheque emitido que el del campo ÚLTIMO Nº | **Sí** = emitir desde el número de Finnegans (elegir esto si otra persona usó la chequera). **No** = seguir con el de la app (correcto si se saltearon cheques anulados a propósito). **Cancelar** = revisar antes de procesar |
-| **Cheques con la fecha en alerta** (banner naranja) | Fecha del Excel inexistente, cheque a hoy o antes, o a más de 180 días | Corregir la fecha en la columna Vencimiento. Hasta que no quede ninguna, el botón de enviar está deshabilitado |
+| **Cheques con la fecha en alerta** (banner naranja) | Fecha del Excel inexistente, cheque a hoy o antes, o a más de 180 días | Corregir la fecha en la columna Vencimiento (o tildar el check si el plazo largo es correcto). Hasta que no quede ninguna, el botón de enviar está deshabilitado |
 | **Hay cheques con la fecha en alerta** (cartel rojo, “No se envió nada”) | Se intentó enviar con alertas pendientes | Es la segunda barrera de la app: lista proveedor, número de cheque y motivo. Volver a Procesar y corregir en la pantalla previa |
 | **No se pudo cargar chequeras** | Sin conexión o credenciales inválidas | Probar conexión en Configuración |
 | **⚠ *proveedor*: no se pudo cargar histórico de retenciones** | Falló la consulta del mes | **Atención:** la retención puede quedar calculada de menos. Verificar antes de confirmar |
@@ -471,7 +481,7 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | Un cheque aparece en naranja diciendo que la fecha no existe | El Excel tenía `31/02` o similar | Poner la fecha correcta en la columna Vencimiento (el cheque no se pierde) |
 | Un cheque quedó con fecha de hoy | La forma de pago no traía fechas y se usó la fecha de respaldo | Corregir la fecha en la pantalla previa |
 | Un cheque salió al año que viene | Fecha `dd/mm` ya pasada: la app asume el año siguiente | Corregirla en la pantalla previa (banner naranja) |
-| No se puede apretar “Confirmar y enviar” | Queda al menos un cheque en naranja | Corregir todas las fechas en alerta; el botón se habilita solo |
+| No se puede apretar “Confirmar y enviar” | Queda al menos un cheque en naranja | Corregir las fechas en alerta (o tildar el check de los +180 días); el botón se habilita solo |
 | Los números de cheque no coinciden con la chequera física | ÚLTIMO Nº desactualizado | Corregir el campo antes de procesar |
 
 ### 9.3 Errores de Finnegans al enviar
@@ -579,8 +589,9 @@ No. Lo único editable es la **fecha de vencimiento de los cheques** en la panta
 Los importes se corrigen en el Excel.
 
 **Tengo que emitir un cheque a más de 180 días de verdad, ¿qué hago?**
-Hoy la app no lo permite: cualquier alerta bloquea el envío. Ese pago hay que cargarlo a mano
-en Finnegans, o pedir que se cambie el umbral en la aplicación.
+Se puede: en la pantalla previa, tildá el check *“Confirmo que los cheques a más de 180 días
+están bien”* del cartel naranja y se habilita el envío. Fijate primero en el motivo de la
+alerta, que dice a cuántos días quedó cada cheque.
 
 **¿Por qué un proveedor no tiene retención?**
 Porque no tiene la retención configurada en Finnegans, porque no hay facturas `FC - ` en la

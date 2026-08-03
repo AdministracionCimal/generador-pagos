@@ -5,6 +5,7 @@ from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -19,7 +20,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.domain.alertas_cheque import ALERTA_FUTURO_DIAS, motivo_alerta
+from src.domain.alertas_cheque import (
+    ALERTA_FUTURO_DIAS,
+    es_muy_futura,
+    motivo_alerta,
+)
 from src.domain.models import ChequeEmitido, Modalidad, OpPago, ProveedorTanda
 from src.ui import theme
 
@@ -64,6 +69,7 @@ class PreviewDialog(QDialog):
         self._cheque_rows: list[dict] = []  # {cheque, table, row, date_edit, items}
         self._warn_banner: QFrame | None = None
         self._warn_label: QLabel | None = None
+        self._chk_plazo: QCheckBox | None = None
         self._btn_ok = None
 
         total_ops   = len(ops)
@@ -403,13 +409,21 @@ class PreviewDialog(QDialog):
         self._refresh_alertas()
 
     def _refresh_alertas(self) -> None:
+        confirmar = self._chk_plazo is not None and self._chk_plazo.isChecked()
         alertas = 0
+        muy_futuras = 0
         for info in self._cheque_rows:
-            motivo = motivo_alerta(info["cheque"], self._today)
+            cheque = info["cheque"]
+            # La confirmación viaja en el cheque: `_ProcesarWorker` tiene la misma
+            # referencia y la revalidación de main_window la respeta.
+            cheque.plazo_confirmado = confirmar
+            if es_muy_futura(cheque, self._today):
+                muy_futuras += 1
+            motivo = motivo_alerta(cheque, self._today)
             if motivo is not None:
                 alertas += 1
             self._paint_cheque_row(info, motivo)
-        self._update_warn_banner(alertas)
+        self._update_warn_banner(alertas, muy_futuras)
         self._actualizar_boton_enviar(alertas)
 
     def _actualizar_boton_enviar(self, alertas: int) -> None:
@@ -487,34 +501,70 @@ class PreviewDialog(QDialog):
             f"  border-radius: 8px;"
             f"}}"
         )
-        row = QHBoxLayout(card)
-        row.setContentsMargins(18, 12, 18, 12)
-        row.setSpacing(12)
+        col = QVBoxLayout(card)
+        col.setContentsMargins(18, 12, 18, 12)
+        col.setSpacing(8)
 
+        row = QHBoxLayout()
+        row.setSpacing(12)
         row.addWidget(theme.make_badge("Cheques con fecha sospechosa", "warning"))
 
         self._warn_label = QLabel("")
         self._warn_label.setStyleSheet(f"color: {ALERTA_FG}; font-weight: 600;")
         self._warn_label.setWordWrap(True)
         row.addWidget(self._warn_label, stretch=1)
+        col.addLayout(row)
+
+        # Un cheque a 240 días puede ser correcto (la ley permite hasta 360), así
+        # que este caso —a diferencia de una fecha vencida o inexistente— se puede
+        # confirmar en lugar de corregir.
+        self._chk_plazo = QCheckBox(
+            f"Confirmo que los cheques a más de {ALERTA_FUTURO_DIAS} días están "
+            f"bien y se envían con esa fecha"
+        )
+        self._chk_plazo.setStyleSheet(
+            f"color: {ALERTA_FG}; font-weight: 600; background: transparent;"
+        )
+        self._chk_plazo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._chk_plazo.setVisible(False)
+        self._chk_plazo.toggled.connect(lambda _: self._refresh_alertas())
+        col.addWidget(self._chk_plazo)
 
         card.setVisible(False)
         return card
 
-    def _update_warn_banner(self, alertas: int) -> None:
+    def _update_warn_banner(self, alertas: int, muy_futuras: int = 0) -> None:
         if self._warn_banner is None or self._warn_label is None:
             return
-        if alertas <= 0:
+
+        # El check se muestra por la existencia de cheques largos, no por la
+        # alerta: si dependiera de la alerta, al confirmarla desaparecería.
+        if self._chk_plazo is not None:
+            self._chk_plazo.setVisible(muy_futuras > 0)
+
+        if alertas <= 0 and muy_futuras <= 0:
             self._warn_banner.setVisible(False)
             return
-        plural = "cheque" if alertas == 1 else "cheques"
-        self._warn_label.setText(
-            f"Hay {alertas} {plural} con la fecha en alerta: una fecha que no existe "
-            f"en el Excel, hoy {self._today.strftime('%d/%m/%Y')} o antes (el banco "
-            f"solo acepta cheques diferidos), o a más de {ALERTA_FUTURO_DIAS} días. "
-            f"<b>No se puede enviar hasta corregirlas todas</b> — hacé clic en la "
-            f"columna Vencimiento; el POST manda el valor que quede en la tabla."
-        )
+
+        if alertas <= 0:
+            uno = muy_futuras == 1
+            self._warn_label.setText(
+                f"{muy_futuras} {'cheque' if uno else 'cheques'} a más de "
+                f"{ALERTA_FUTURO_DIAS} días, {'confirmado' if uno else 'confirmados'} "
+                f"por vos: {'se envía' if uno else 'se envían'} con esa fecha. "
+                f"Destildá el check si {'lo' if uno else 'los'} querés revisar."
+            )
+        else:
+            plural = "cheque" if alertas == 1 else "cheques"
+            self._warn_label.setText(
+                f"Hay {alertas} {plural} con la fecha en alerta: una fecha que no "
+                f"existe en el Excel, hoy {self._today.strftime('%d/%m/%Y')} o antes "
+                f"(el banco solo acepta cheques diferidos), o a más de "
+                f"{ALERTA_FUTURO_DIAS} días. <b>No se puede enviar hasta resolverlas "
+                f"todas</b> — corregí la columna Vencimiento"
+                + (", o tildá el check si el plazo largo es correcto."
+                   if muy_futuras else ".")
+            )
         self._warn_banner.setVisible(True)
 
     def _payment_total(self, op: OpPago) -> float:

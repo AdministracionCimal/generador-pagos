@@ -247,9 +247,18 @@ Motivación: cheque emitido a **06/05/2027** cuando se quiso poner 06/06/2026 (t
 La regla vive en `domain/alertas_cheque.py`, **no en la UI**, porque la usan dos lugares: `PreviewDialog` (pintar la fila y habilitar el botón) y `main_window` (negarse a enviar).
 
 - Constante `ALERTA_FUTURO_DIAS = 180`
-- `motivo_alerta(cheque, hoy)` devuelve el motivo o `None`. Casos: `fecha_origen_invalida` seteada (la fecha del Excel no existe, ej. `31/02`) · `< hoy` · `== hoy` (el banco no acepta cheques al día) · `> hoy + 180 días`
+- `alerta_cheque(cheque, hoy)` devuelve `(tipo, motivo)` o `None`. Tres tipos:
+
+| Tipo | Cuándo | Se puede confirmar |
+|---|---|---|
+| `ALERTA_FECHA_INVALIDA` | `fecha_origen_invalida` seteada (la fecha del Excel no existe, ej. `31/02`) | ❌ hay que elegir la fecha |
+| `ALERTA_VENCIDA` | `< hoy` o `== hoy` (el banco no acepta cheques al día) | ❌ el banco no lo toma |
+| `ALERTA_MUY_FUTURA` | `> hoy + 180 días` | ✅ un cheque a 240 días puede ser correcto (la ley permite hasta 360) |
+
+- `motivo_alerta()` es el wrapper que devuelve sólo el texto (pintado de filas y tooltips). El motivo de `MUY_FUTURA` incluye los días reales (`fecha a 240 días (más de 180)`) para poder distinguir un plazo intencional de un typo del año
 - **El envío está bloqueado mientras quede una sola alerta**: `PreviewDialog` deshabilita "Confirmar y enviar" y lo recalcula en vivo al editar cada fecha; `main_window` vuelve a chequear con `cheques_en_alerta()` después de que el diálogo acepta y aborta con un `QMessageBox.critical` que lista proveedor + número de cheque + motivo (defensa en profundidad: cubre overflow, reintentos y bugs futuros del diálogo)
 - Editar la fecha limpia `fecha_origen_invalida`: el usuario eligió, la del Excel ya no manda
+- El check de confirmación setea `ChequeEmitido.plazo_confirmado` en **todos** los cheques del diálogo, así la decisión viaja con el dato y la revalidación de `main_window` la respeta sin parámetros extra. Su visibilidad depende de `es_muy_futura()` (que ignora la confirmación), **no** de la alerta: si dependiera de la alerta, al tildarlo desaparecería y el cheque volvería a quedar bloqueado. El banner queda visible con otro texto mientras haya cheques largos confirmados, para poder destildar
 - Fila pintada de naranja (`#FFE2C4` / borde `#E08A2B` / texto `#7A3E00`) cuando el motivo no es `None`
 - `QDateEdit` (variante `NoScrollDateEdit`) en la columna "Vencimiento" con `setCalendarPopup(True)` y formato `dd/MM/yyyy`
 - Ancho de la columna fijado a 140 px (`ResizeMode.Fixed`) porque `ResizeToContents` no respeta el `sizeHint` de un `cellWidget`
@@ -353,7 +362,7 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 3. **No volver a mandar `ImporteMonTransaccion` negativo** en CtaCte — usar `DebeHaber=-1` con valor absoluto
 4. **No paralelizar `_ProcesarWorker`** — los POST de OPs son serializados por diseño
 5. **No reagregar la columna "Comparación"** en ResultDialog — generaba falsos warnings
-6. **Ningún cheque en alerta puede llegar al POST** — el diálogo deshabilita el botón y `main_window` vuelve a validar con `cheques_en_alerta()`. No sacar ninguna de las dos barreras
+6. **Ningún cheque en alerta puede llegar al POST** — el diálogo deshabilita el botón y `main_window` vuelve a validar con `cheques_en_alerta()`. No sacar ninguna de las dos barreras. La **única** alerta confirmable es `MUY_FUTURA`; fecha inexistente y fecha ≤ hoy no se pueden confirmar nunca
 7. **Una fecha inválida en «Forma de pago» genera su cheque marcado, nunca se descarta** — descartarla cambia el fraccionamiento en silencio
 8. **La alerta de fechas de cheque tiene que ser bidireccional** — flag para `< hoy` **y** `> hoy + 180 días`. El parser de fechas infiere el año siguiente cuando la fecha ya pasó, así que un typo en el día se manifiesta como fecha muy futura, no como fecha atrasada
 9. **Todo QDateEdit interactivo debe ignorar la rueda del mouse** — usar `NoScrollDateEdit` (mismo patrón que `NoScrollComboBox`); si no, un scroll accidental cambia el valor
@@ -374,6 +383,6 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 | 0 | Commit/push de fechas editables + manual de usuario | ✅ hecho |
 | 1 | Riesgo de plata: reenvío duplicado, numeración de cheques, cortes de red | ✅ hecho |
 | 2 | Silencios en la lectura del Excel: amarillo de tema ignorado, `Documento` con formato distinto que descarta al proveedor como "sin saldo", fechas inexistentes (`Ch 31/02`), mensaje de encabezados fila 1, aviso de columna "importe" duplicada | ✅ hecho |
-| 2b | Fechas inexistentes (`Ch 31/02`): generan su cheque marcado en vez de desaparecer; alerta naranja editable y **bloqueo del envío** mientras quede una alerta (regla movida a `domain/alertas_cheque.py`) | ✅ hecho |
+| 2b | Fechas inexistentes (`Ch 31/02`): generan su cheque marcado en vez de desaparecer; alerta naranja editable y **bloqueo del envío** mientras quede una alerta (regla movida a `domain/alertas_cheque.py`); check para confirmar plazos de más de 180 días | ✅ hecho |
 | 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` caen en MANUAL | ⏳ pendiente |
 | 4 | Distribución: versión visible en el título, aviso de versión nueva, firma de código (compra) | ⏳ pendiente |
