@@ -1,10 +1,5 @@
 """Dialogo de verificacion previo al envio a Finnegans."""
-from datetime import date, timedelta
-
-# Umbral para flaggear cheques con fecha sospechosa hacia el futuro.
-# Caso real: typo en el día (06/05 en lugar de 06/06) hace que el parser
-# infiera año siguiente y el cheque salga a ~1 año en lugar de ~1 mes.
-ALERTA_FUTURO_DIAS = 180
+from datetime import date
 
 from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtGui import QBrush, QColor
@@ -24,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.domain.alertas_cheque import ALERTA_FUTURO_DIAS, motivo_alerta
 from src.domain.models import ChequeEmitido, Modalidad, OpPago, ProveedorTanda
 from src.ui import theme
 
@@ -68,6 +64,7 @@ class PreviewDialog(QDialog):
         self._cheque_rows: list[dict] = []  # {cheque, table, row, date_edit, items}
         self._warn_banner: QFrame | None = None
         self._warn_label: QLabel | None = None
+        self._btn_ok = None
 
         total_ops   = len(ops)
         total_bruto = sum(float(op.proveedor.importe_total) for op in ops)
@@ -122,6 +119,7 @@ class PreviewDialog(QDialog):
         btn_ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
         btn_ok.setText("Confirmar y enviar")
         btn_ok.setObjectName("Primary")
+        self._btn_ok = btn_ok
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -397,31 +395,31 @@ class PreviewDialog(QDialog):
 
     def _on_cheque_date_changed(self, ch: ChequeEmitido, qd: QDate) -> None:
         nueva = date(qd.year(), qd.month(), qd.day())
-        if nueva == ch.fecha_vencimiento:
+        if nueva == ch.fecha_vencimiento and not ch.fecha_origen_invalida:
             return
         ch.fecha_vencimiento = nueva
+        # El usuario eligió una fecha: la del Excel ya no manda.
+        ch.fecha_origen_invalida = ""
         self._refresh_alertas()
-
-    def _motivo_alerta(self, fecha: date) -> str | None:
-        """Retorna el motivo si la fecha está fuera de rango razonable, o None.
-        Un cheque debe ser diferido (mañana en adelante): el banco no acepta
-        una fecha igual o anterior al día actual."""
-        if fecha < self._today:
-            return "anterior a hoy"
-        if fecha == self._today:
-            return "de hoy (el banco solo acepta cheques diferidos)"
-        if fecha > self._today + timedelta(days=ALERTA_FUTURO_DIAS):
-            return f"a más de {ALERTA_FUTURO_DIAS} días"
-        return None
 
     def _refresh_alertas(self) -> None:
         alertas = 0
         for info in self._cheque_rows:
-            motivo = self._motivo_alerta(info["cheque"].fecha_vencimiento)
+            motivo = motivo_alerta(info["cheque"], self._today)
             if motivo is not None:
                 alertas += 1
             self._paint_cheque_row(info, motivo)
         self._update_warn_banner(alertas)
+        self._actualizar_boton_enviar(alertas)
+
+    def _actualizar_boton_enviar(self, alertas: int) -> None:
+        """Sin alertas no se envía: es la única barrera antes del POST."""
+        if self._btn_ok is None:
+            return
+        self._btn_ok.setEnabled(alertas == 0)
+        self._btn_ok.setToolTip(
+            "Corregí las fechas en alerta para poder enviar." if alertas else ""
+        )
 
     def _paint_cheque_row(self, info: dict, motivo: str | None) -> None:
         en_alerta = motivo is not None
@@ -436,7 +434,7 @@ class PreviewDialog(QDialog):
         if date_edit.property("alerta") == en_alerta:
             # El estilo no cambia, pero sí puede haber cambiado el motivo en el tooltip.
             date_edit.setToolTip(
-                f"Fecha {motivo}. Hacé clic para corregir." if en_alerta else ""
+                f"{motivo}. Hacé clic para corregir." if en_alerta else ""
             )
             return
         date_edit.setProperty("alerta", en_alerta)
@@ -511,10 +509,11 @@ class PreviewDialog(QDialog):
             return
         plural = "cheque" if alertas == 1 else "cheques"
         self._warn_label.setText(
-            f"Hay {alertas} {plural} con fecha fuera del rango razonable "
-            f"(hoy {self._today.strftime('%d/%m/%Y')} o antes — el banco solo "
-            f"acepta cheques diferidos — o a más de {ALERTA_FUTURO_DIAS} días). "
-            f"Revisalo antes de confirmar — el POST envía el valor que veas en la tabla."
+            f"Hay {alertas} {plural} con la fecha en alerta: una fecha que no existe "
+            f"en el Excel, hoy {self._today.strftime('%d/%m/%Y')} o antes (el banco "
+            f"solo acepta cheques diferidos), o a más de {ALERTA_FUTURO_DIAS} días. "
+            f"<b>No se puede enviar hasta corregirlas todas</b> — hacé clic en la "
+            f"columna Vencimiento; el POST manda el valor que quede en la tabla."
         )
         self._warn_banner.setVisible(True)
 

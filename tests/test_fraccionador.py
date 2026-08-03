@@ -30,6 +30,34 @@ class TestFraccionarItem:
         assert cheques[0].numero == "73189907"
         assert sig == 73189908
 
+    def test_fecha_inexistente_no_pierde_el_cheque(self):
+        """«Ch 31/02 - 10/06» tiene que dar 2 cheques, no 1 por el total: el
+        cheque de la fecha mal escrita queda marcado para corregir."""
+        item = _item("FC - 1", "100000", "Ch 31/02 - 10/06")
+        cheques, sig = fraccionar_item(item, numero_desde=100, fecha_emision=FECHA_EMISION, anio=2026)
+        assert len(cheques) == 2
+        assert sig == 102
+        assert sum(c.importe for c in cheques) == Decimal("100000")
+        marcados = [c for c in cheques if c.fecha_origen_invalida]
+        assert len(marcados) == 1
+        assert marcados[0].fecha_origen_invalida == "31/02"
+
+    def test_fecha_valida_no_queda_marcada(self):
+        item = _item("FC - 1", "1000", "Ch 15/05")
+        cheques, _ = fraccionar_item(item, numero_desde=1, fecha_emision=FECHA_EMISION, anio=2026)
+        assert cheques[0].fecha_origen_invalida == ""
+
+    def test_todas_invalidas_usa_fecha_vto_como_provisoria(self):
+        item = ItemFactura(
+            documento="FC - 1", comprobante="", descripcion="",
+            importe=Decimal("500"), fecha_vto=date(2026, 9, 15),
+            modalidad_pago="Ch 31/02",
+        )
+        cheques, _ = fraccionar_item(item, numero_desde=1, fecha_emision=FECHA_EMISION, anio=2026)
+        assert len(cheques) == 1
+        assert cheques[0].fecha_vencimiento == date(2026, 9, 15)
+        assert cheques[0].fecha_origen_invalida == "31/02"
+
     def test_fc_seis_cheques(self):
         item = _item("FC - 21562", "12014792.88", "Ch 08/06 - 09/06 - 18/06 - 19/06 - 05/07 - 06/07")
         cheques, sig = fraccionar_item(item, numero_desde=100, fecha_emision=FECHA_EMISION, anio=2026)

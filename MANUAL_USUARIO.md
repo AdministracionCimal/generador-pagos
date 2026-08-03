@@ -234,7 +234,7 @@ un MOVFONDOS también puede pagarse en 3 cheques.
 | `Transferencia inmediata` | ❌ No se reconoce → Carga manual |
 | `trans` | ❌ Demasiado corto → Carga manual |
 | `efectivo`, `mercado pago`, `tarjeta` | ❌ Carga manual (correcto: la app no los soporta) |
-| `Ch 31/02` | ⚠️ Fecha inexistente: se ignora (sale un cheque menos). **La app avisa al cargar** indicando la fecha inválida |
+| `Ch 31/02 - 10/06` | ⚠️ El 31/02 no existe. Igual salen **2 cheques**: el de la fecha mal escrita queda con fecha provisoria, marcado en naranja en la pantalla previa, y **la app no deja enviar hasta que le pongas la fecha correcta** |
 
 **Las fechas se escriben `dd/mm` sin año.** La app asume el año en curso y, si la fecha ya
 pasó, asume el año siguiente. De ahí el riesgo: hoy 03/08/2026, escribir `Ch 08/05` genera un
@@ -372,16 +372,26 @@ retenciones calculadas, y arriba los totales **ÓRDENES / BRUTO / RETENCIONES / 
 - La cantidad de cheques y sus **fechas de vencimiento**.
 - Que las retenciones aparezcan donde corresponde.
 
-**Cheques con fecha sospechosa:** las filas pintadas de **naranja** son cheques con fecha
-anterior a hoy, **del día de hoy** (el banco sólo acepta diferidos) o a **más de 180 días**.
-Arriba aparece un cartel con el total de cheques en alerta.
+**Cheques con la fecha en alerta:** las filas pintadas de **naranja** son cheques que la app
+**no va a enviar** así como están. Hay cuatro motivos:
+
+| Motivo | Por qué |
+|---|---|
+| La fecha del Excel no existe (`31/02`) | Nadie eligió el vencimiento: la app puso una provisoria |
+| Fecha anterior a hoy | El banco no la acepta |
+| Fecha de hoy | El banco sólo acepta cheques diferidos |
+| Fecha a más de 180 días | Suele ser un error de tipeo que corrió el año |
+
+Arriba aparece un cartel con el total de cheques en alerta, y **el botón “Confirmar y enviar”
+queda deshabilitado** mientras quede una sola sin resolver.
 
 La columna **Vencimiento es editable**: se hace clic, se corrige la fecha (o se usa el
-calendario) y el cambio **se manda así al sistema**. El cartel se actualiza en el momento.
-La rueda del mouse no modifica las fechas, así que no hay riesgo de cambiarlas sin querer.
+calendario) y el cambio **se manda así al sistema**. El cartel y el botón se actualizan en el
+momento: cuando no queda ninguna fila naranja, se habilita el envío. La rueda del mouse no
+modifica las fechas, así que no hay riesgo de cambiarlas sin querer.
 
-Botones: **Confirmar y enviar** manda las OPs. **Cancelar** vuelve a la pantalla principal
-sin registrar nada.
+Botones: **Confirmar y enviar** manda las OPs (sólo si no hay alertas). **Cancelar** vuelve a
+la pantalla principal sin registrar nada.
 
 ### Paso 6 — Resultado
 
@@ -430,7 +440,8 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | **Proveedores omitidos** | CUIT inválido, sin saldo, importe cero | Revisar cada caso; esos pagos **no se enviaron** |
 | **Nada que procesar** | Ningún pago quedó en estado Listo | Revisar estados en la tabla |
 | **Último número de cheque distinto** | Finnegans informa otro último cheque emitido que el del campo ÚLTIMO Nº | **Sí** = emitir desde el número de Finnegans (elegir esto si otra persona usó la chequera). **No** = seguir con el de la app (correcto si se saltearon cheques anulados a propósito). **Cancelar** = revisar antes de procesar |
-| **Cheques con fecha sospechosa** (banner naranja) | Cheque a hoy o antes, o a más de 180 días | Corregir la fecha en la misma tabla |
+| **Cheques con la fecha en alerta** (banner naranja) | Fecha del Excel inexistente, cheque a hoy o antes, o a más de 180 días | Corregir la fecha en la columna Vencimiento. Hasta que no quede ninguna, el botón de enviar está deshabilitado |
+| **Hay cheques con la fecha en alerta** (cartel rojo, “No se envió nada”) | Se intentó enviar con alertas pendientes | Es la segunda barrera de la app: lista proveedor, número de cheque y motivo. Volver a Procesar y corregir en la pantalla previa |
 | **No se pudo cargar chequeras** | Sin conexión o credenciales inválidas | Probar conexión en Configuración |
 | **⚠ *proveedor*: no se pudo cargar histórico de retenciones** | Falló la consulta del mes | **Atención:** la retención puede quedar calculada de menos. Verificar antes de confirmar |
 
@@ -456,9 +467,11 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 |---|---|---|
 | Un proveedor quedó en Carga manual sin motivo aparente | Texto de forma de pago no reconocido (`Cheque 15/05`, `transferencia bancaria`) | Escribir `Ch dd/mm` o `transferencia` |
 | “Modalidad mixta” | El proveedor mezcla cheque y transferencia | Unificar, o partir en dos tandas |
-| Salen menos cheques de los esperados | Alguna fecha es inexistente (`31/02`) o está mal escrita | Corregir las fechas; la app avisa cuál al cargar |
+| Salen menos cheques de los esperados | Falta alguna fecha en la columna Forma de pago | Revisar el texto: cada `dd/mm` genera un cheque |
+| Un cheque aparece en naranja diciendo que la fecha no existe | El Excel tenía `31/02` o similar | Poner la fecha correcta en la columna Vencimiento (el cheque no se pierde) |
 | Un cheque quedó con fecha de hoy | La forma de pago no traía fechas y se usó la fecha de respaldo | Corregir la fecha en la pantalla previa |
 | Un cheque salió al año que viene | Fecha `dd/mm` ya pasada: la app asume el año siguiente | Corregirla en la pantalla previa (banner naranja) |
+| No se puede apretar “Confirmar y enviar” | Queda al menos un cheque en naranja | Corregir todas las fechas en alerta; el botón se habilita solo |
 | Los números de cheque no coinciden con la chequera física | ÚLTIMO Nº desactualizado | Corregir el campo antes de procesar |
 
 ### 9.3 Errores de Finnegans al enviar
@@ -564,6 +577,10 @@ sistema y continuar con las pendientes.
 **¿Puedo cambiar un importe desde la app?**
 No. Lo único editable es la **fecha de vencimiento de los cheques** en la pantalla previa.
 Los importes se corrigen en el Excel.
+
+**Tengo que emitir un cheque a más de 180 días de verdad, ¿qué hago?**
+Hoy la app no lo permite: cualquier alerta bloquea el envío. Ese pago hay que cargarlo a mano
+en Finnegans, o pedir que se cambie el umbral en la aplicación.
 
 **¿Por qué un proveedor no tiene retención?**
 Porque no tiene la retención configurada en Finnegans, porque no hay facturas `FC - ` en la

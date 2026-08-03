@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 import src.config as config
 from src.api.client import ApiError, AuthError, FinnegansClient, NetworkError
+from src.domain.alertas_cheque import cheques_en_alerta
 from src.domain.clasificador import clasificar
 from src.domain.documento import es_fc, es_pago, normalizar as normalizar_doc
 from src.domain.fraccionador import fraccionar_proveedor
@@ -1193,6 +1194,25 @@ class MainWindow(QMainWindow):
         preview = PreviewDialog(self._ops_a_procesar, manuales, self)
         theme.show_animated(preview)
         if not preview.exec():
+            self._btn_procesar.setEnabled(True)
+            return
+
+        # Segunda barrera: el diálogo ya deshabilita el envío con alertas activas,
+        # pero ningún cheque con fecha inválida tiene que poder llegar al POST por
+        # ningún camino (overflow, reintento, un bug futuro en el diálogo).
+        alertas = cheques_en_alerta(self._ops_a_procesar, date.today())
+        if alertas:
+            QMessageBox.critical(
+                self,
+                "Hay cheques con la fecha en alerta",
+                f"No se envió nada. {len(alertas)} cheque(s) tienen la fecha en "
+                f"alerta y hay que corregirla en la pantalla de verificación:\n\n"
+                + "\n".join(
+                    f"  • {nombre} — cheque {numero}: {motivo}"
+                    for nombre, numero, motivo in alertas[:15]
+                )
+                + ("\n  • …" if len(alertas) > 15 else ""),
+            )
             self._btn_procesar.setEnabled(True)
             return
 

@@ -4,7 +4,37 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from .documento import es_fc as _es_fc
 from .models import ChequeEmitido, ItemFactura
-from .parser_pago import parsear_fechas_col_l
+from .parser_pago import parsear_slots_fecha
+
+
+def _cheque_de_slot(
+    numero: int,
+    importe: Decimal,
+    fecha_emision: date,
+    token: str,
+    fecha_vto: date | None,
+    fallback: date | None = None,
+) -> ChequeEmitido:
+    """Cheque para un slot de «Forma de pago».
+
+    Si la fecha del Excel no existía (`31/02`), el cheque igual se emite —con
+    fecha provisoria y marcado— para no perder el fraccionamiento. La pantalla
+    previa lo pinta en alerta y bloquea el envío hasta que se corrija.
+    """
+    if fecha_vto is not None:
+        return ChequeEmitido(
+            numero=str(numero),
+            importe=importe,
+            fecha_emision=fecha_emision,
+            fecha_vencimiento=fecha_vto,
+        )
+    return ChequeEmitido(
+        numero=str(numero),
+        importe=importe,
+        fecha_emision=fecha_emision,
+        fecha_vencimiento=fallback or fecha_emision,
+        fecha_origen_invalida=token,
+    )
 
 
 def fraccionar_item(
@@ -18,10 +48,12 @@ def fraccionar_item(
     La cantidad de cheques sale de la columna «Forma de pago» (modalidad_pago).
     El tipo de documento (FC, MOVFONDOS, ND, etc.) NO determina cuántos cheques;
     cualquiera puede pagarse con 1 o N cheques según las fechas que traiga.
-    Si no hay fechas parseables → 1 cheque (fallback con fecha_vto).
+    Si no hay ninguna fecha en el texto → 1 cheque (fallback con fecha_vto).
+    Las fechas inexistentes (`31/02`) sí cuentan: generan su cheque marcado para
+    corregir, así el fraccionamiento no cambia por un error de tipeo.
     """
-    fechas = parsear_fechas_col_l(item.modalidad_pago, anio=anio, fecha_emision=fecha_emision)
-    if not fechas:
+    slots = parsear_slots_fecha(item.modalidad_pago, anio=anio, fecha_emision=fecha_emision)
+    if not slots:
         fecha_vto = item.fecha_vto or fecha_emision
         cheque = ChequeEmitido(
             numero=str(numero_desde),
@@ -31,19 +63,16 @@ def fraccionar_item(
         )
         return [cheque], numero_desde + 1
 
-    n = len(fechas)
+    n = len(slots)
     importe_base = (item.importe / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     suma_base    = importe_base * n
     diferencia   = item.importe - suma_base   # centavos de ajuste al último
 
     cheques = []
-    for i, fecha_vto in enumerate(fechas):
+    for i, (token, fecha_vto) in enumerate(slots):
         imp = importe_base + diferencia if i == n - 1 else importe_base
-        cheques.append(ChequeEmitido(
-            numero=str(numero_desde + i),
-            importe=imp,
-            fecha_emision=fecha_emision,
-            fecha_vencimiento=fecha_vto,
+        cheques.append(_cheque_de_slot(
+            numero_desde + i, imp, fecha_emision, token, fecha_vto, item.fecha_vto
         ))
 
     return cheques, numero_desde + n
@@ -78,27 +107,26 @@ def fraccionar_proveedor(
 
     # ── FCs: consolidar si todas comparten las mismas fechas ──────────────
     if items_fc:
-        fechas_por_item = [
-            parsear_fechas_col_l(i.modalidad_pago, anio=anio, fecha_emision=fecha_emision)
+        slots_por_item = [
+            parsear_slots_fecha(i.modalidad_pago, anio=anio, fecha_emision=fecha_emision)
             for i in items_fc
         ]
-        claves = {tuple(f.isoformat() for f in fs) for fs in fechas_por_item}
-        consolidar = len(claves) == 1 and all(len(fs) > 0 for fs in fechas_por_item)
+        # Se compara por el texto de las fechas: dos FCs con el mismo «Ch 08/06 -
+        # 09/06» consolidan, y las fechas inválidas no rompen la comparación.
+        claves = {tuple(token for token, _ in slots) for slots in slots_por_item}
+        consolidar = len(claves) == 1 and all(len(slots) > 0 for slots in slots_por_item)
 
         if consolidar and len(items_fc) > 1:
             # Un único set de N cheques por el total neto (FCs − créditos)
-            fechas = fechas_por_item[0]
+            slots  = slots_por_item[0]
             total  = sum(i.importe for i in items_fc) + credito_total
-            n      = len(fechas)
+            n      = len(slots)
             base   = (total / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             ajuste = total - base * n
-            for i, fecha_vto in enumerate(fechas):
+            for i, (token, fecha_vto) in enumerate(slots):
                 imp = base + ajuste if i == n - 1 else base
-                todos.append(ChequeEmitido(
-                    numero=str(siguiente + i),
-                    importe=imp,
-                    fecha_emision=fecha_emision,
-                    fecha_vencimiento=fecha_vto,
+                todos.append(_cheque_de_slot(
+                    siguiente + i, imp, fecha_emision, token, fecha_vto
                 ))
             siguiente += n
             # Crédito ya consumido en el cálculo del total

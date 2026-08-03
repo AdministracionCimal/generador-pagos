@@ -40,6 +40,10 @@ class ChequeEmitido:
     importe: Decimal
     fecha_emision: date
     fecha_vencimiento: date
+    # Token del Excel que no era una fecha válida (ej. "31/02"). Si está seteado,
+    # `fecha_vencimiento` es provisoria: el usuario tiene que corregirla en la
+    # pantalla previa y la app se niega a enviar el cheque hasta entonces.
+    fecha_origen_invalida: str = ""
 
 
 @dataclass

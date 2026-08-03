@@ -19,6 +19,42 @@ _TRANSFERENCIA_EXACTAS = {
 _TRANSFERENCIA_THRESHOLD = 0.80
 
 
+def parsear_slots_fecha(
+    texto: str,
+    anio: int | None = None,
+    fecha_emision: date | None = None,
+) -> list[tuple[str, date | None]]:
+    """Un "slot" por cada `dd/mm` del texto, en orden y sin descartar nada.
+
+    `"Ch 31/02 - 10/06"` -> `[("31/02", None), ("10/06", date(...))]`
+
+    El slot con `None` es una fecha que el usuario escribió mal (`31/02` no
+    existe). Antes se descartaba, así que ese cheque desaparecía y el importe
+    quedaba concentrado en los demás sin que nadie se enterara. Conservarlo
+    permite emitirlo con fecha provisoria y pedirle al usuario que la corrija.
+    """
+    ref = fecha_emision or date.today()
+    if anio is None:
+        anio = ref.year
+
+    slots: list[tuple[str, date | None]] = []
+    for m in _RE_FECHA.finditer(texto or ""):
+        dia, mes = int(m.group(1)), int(m.group(2))
+        try:
+            d = date(anio, mes, dia)
+        except ValueError:
+            slots.append((m.group(0), None))
+            continue
+        # Si la fecha cae antes de la emisión, probablemente es del año siguiente
+        if fecha_emision is not None and d < fecha_emision:
+            try:
+                d = date(anio + 1, mes, dia)
+            except ValueError:
+                pass
+        slots.append((m.group(0), d))
+    return slots
+
+
 def parsear_fechas_col_l(
     texto: str,
     anio: int | None = None,
@@ -28,29 +64,13 @@ def parsear_fechas_col_l(
     "Ch 08/05 - 10/05 - 11/05 - 12/05" -> [date(2026,5,8), date(2026,5,10), ...]
     Retorna [] si el texto no contiene fechas (ej. "transferencia").
 
-    Si se provee fecha_emision, cualquier fecha parseada que quede antes de la
-    emisión se desplaza al año siguiente (cubre pagos con vencimientos en
-    enero/febrero cuando se emiten en noviembre/diciembre).
+    Sólo las fechas válidas. Para fraccionar cheques usar `parsear_slots_fecha`,
+    que además conserva las inválidas.
     """
-    ref = fecha_emision or date.today()
-    if anio is None:
-        anio = ref.year
-
-    fechas = []
-    for m in _RE_FECHA.finditer(texto):
-        dia, mes = int(m.group(1)), int(m.group(2))
-        try:
-            d = date(anio, mes, dia)
-        except ValueError:
-            continue
-        # Si la fecha cae antes de la emisión, probablemente es del año siguiente
-        if fecha_emision is not None and d < fecha_emision:
-            try:
-                d = date(anio + 1, mes, dia)
-            except ValueError:
-                pass
-        fechas.append(d)
-    return fechas
+    return [
+        d for _, d in parsear_slots_fecha(texto, anio, fecha_emision)
+        if d is not None
+    ]
 
 
 def fechas_descartadas(texto: str, anio: int | None = None) -> list[str]:
@@ -59,16 +79,10 @@ def fechas_descartadas(texto: str, anio: int | None = None) -> list[str]:
     `parsear_fechas_col_l` los ignora, así que el proveedor terminaba con un
     cheque menos sin que nadie se enterara. Esto permite avisarlo al cargar.
     """
-    if anio is None:
-        anio = date.today().year
-    invalidas: list[str] = []
-    for m in _RE_FECHA.finditer(texto or ""):
-        dia, mes = int(m.group(1)), int(m.group(2))
-        try:
-            date(anio, mes, dia)
-        except ValueError:
-            invalidas.append(m.group(0))
-    return invalidas
+    return [
+        token for token, fecha in parsear_slots_fecha(texto, anio)
+        if fecha is None
+    ]
 
 
 def es_cheque(texto: str) -> bool:

@@ -23,6 +23,7 @@ src/
   config.py               ← config cifrada con Fernet en %APPDATA%
   main.py                 ← entry point PyQt6
   domain/
+    alertas_cheque.py     ← motivo_alerta/cheques_en_alerta (regla compartida UI + envío)
     documento.py          ← normaliza «Documento» (FC-21562 → FC - 21562) + es_fc/es_pago
     models.py             ← ItemFactura, ProveedorTanda, ChequeEmitido, OpPago, Modalidad
     clasificador.py       ← asigna CHEQUE_PROPIO / TRANSFERENCIA / MANUAL (por signo + Forma de pago)
@@ -110,7 +111,8 @@ Amarillo aceptado: `FFFF00` en cualquiera de sus codificaciones (`FFFFFF00`, `00
 5. `_construir_ops()` → arma `OpPago[]` con cheques fraccionados y retenciones calculadas
 6. `_manejar_overflow()` → diálogo para asignar chequera alternativa si se excede el límite
 7. `_asignar_numeros_op()` → calcula `numero_comprobante_estimado`
-8. `PreviewDialog` → el usuario confirma; puede **editar la fecha de vencimiento de cada cheque** in-line (mutación directa sobre `ChequeEmitido.fecha_vencimiento`, que llega al POST sin pasos extra). Filas con fecha < hoy o > hoy + 180 días se pintan de naranja y aparece un banner con el conteo
+8. `PreviewDialog` → el usuario confirma; puede **editar la fecha de vencimiento de cada cheque** in-line (mutación directa sobre `ChequeEmitido.fecha_vencimiento`, que llega al POST sin pasos extra). Filas en alerta (fecha del Excel inexistente, ≤ hoy, o > hoy + 180 días) se pintan de naranja, aparece un banner con el conteo y **el botón "Confirmar y enviar" queda deshabilitado hasta que no quede ninguna**
+8b. `main_window` revalida con `cheques_en_alerta()` después del diálogo y aborta el envío si queda alguna
 9. `_ProcesarWorker` (QThread, **serial intencionalmente**): POST por cada OP → `ResultDialog`
 10. `_on_terminado` → invalida el cache de saldos siempre (cualquier POST pudo haber quedado registrado) y actualiza ÚLTIMO Nº de la chequera principal. Si **todos** los resultados fueron OK, `_limpiar_tras_envio_exitoso` vacía `_proveedores`, `_ops_a_procesar`, restaura el label del archivo y repuebla la tabla vacía. Si hubo errores parciales, `_quitar_confirmados` saca de `_proveedores` los que volvieron OK (evita el reenvío duplicado en el reintento)
 
@@ -198,6 +200,7 @@ La cantidad de cheques sale de la **columna "Forma de pago"**, no del prefijo de
 - `Ch 15/05` → 1 cheque
 - `transferencia` (sin fechas) → 1 entrada de banco con el neto
 - Sin contenido parseable → 1 cheque con `fecha_vto` como fallback
+- **Fecha inexistente (`Ch 31/02 - 10/06`) → igual 2 cheques.** `parsear_slots_fecha` conserva un slot por cada `dd/mm` del texto, válido o no; el slot inválido genera su `ChequeEmitido` con fecha provisoria (`fecha_vto` o la de emisión) y `fecha_origen_invalida="31/02"`. Antes se descartaba y quedaba **1 cheque por el importe total**: la plata cerraba pero el fraccionamiento no, y en la pantalla previa se veía normal
 
 Para FCs del mismo proveedor con fechas **idénticas** se consolida en un solo set de N cheques sobre el total (no N cheques por FC). Para fechas distintas, cada FC se fracciona por separado.
 
@@ -237,12 +240,16 @@ Fix defensivo en dos lugares:
 
 Subclases de `QComboBox` y `QDateEdit` definidas en `theme.py`. Overridean `wheelEvent` con `event.ignore()` para evitar cambios accidentales con la rueda del mouse. Ambas comparten el mismo patrón — cada selector interactivo que exponga la app debería usar la variante `NoScroll*` correspondiente.
 
-### Alerta de cheques con fecha fuera de rango (PreviewDialog)
+### Alerta de cheques con fecha fuera de rango (bloqueante)
 
 Motivación: cheque emitido a **06/05/2027** cuando se quiso poner 06/06/2026 (typo de día). Como el parser infiere el año siguiente cuando la fecha ya pasó respecto de hoy, un tipeo en el día terminó mandando el cheque casi un año hacia adelante. La alerta previa al envío atrapa este tipo de error.
 
-- Constante `ALERTA_FUTURO_DIAS = 180` en `preview_dialog.py`
-- Motivo se calcula por cheque: `< hoy` → `"anterior a hoy"`; `> hoy + 180 días` → `"a más de 180 días"`; en rango → `None`
+La regla vive en `domain/alertas_cheque.py`, **no en la UI**, porque la usan dos lugares: `PreviewDialog` (pintar la fila y habilitar el botón) y `main_window` (negarse a enviar).
+
+- Constante `ALERTA_FUTURO_DIAS = 180`
+- `motivo_alerta(cheque, hoy)` devuelve el motivo o `None`. Casos: `fecha_origen_invalida` seteada (la fecha del Excel no existe, ej. `31/02`) · `< hoy` · `== hoy` (el banco no acepta cheques al día) · `> hoy + 180 días`
+- **El envío está bloqueado mientras quede una sola alerta**: `PreviewDialog` deshabilita "Confirmar y enviar" y lo recalcula en vivo al editar cada fecha; `main_window` vuelve a chequear con `cheques_en_alerta()` después de que el diálogo acepta y aborta con un `QMessageBox.critical` que lista proveedor + número de cheque + motivo (defensa en profundidad: cubre overflow, reintentos y bugs futuros del diálogo)
+- Editar la fecha limpia `fecha_origen_invalida`: el usuario eligió, la del Excel ya no manda
 - Fila pintada de naranja (`#FFE2C4` / borde `#E08A2B` / texto `#7A3E00`) cuando el motivo no es `None`
 - `QDateEdit` (variante `NoScrollDateEdit`) en la columna "Vencimiento" con `setCalendarPopup(True)` y formato `dd/MM/yyyy`
 - Ancho de la columna fijado a 140 px (`ResizeMode.Fixed`) porque `ResizeToContents` no respeta el `sizeHint` de un `cellWidget`
@@ -346,15 +353,17 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 3. **No volver a mandar `ImporteMonTransaccion` negativo** en CtaCte — usar `DebeHaber=-1` con valor absoluto
 4. **No paralelizar `_ProcesarWorker`** — los POST de OPs son serializados por diseño
 5. **No reagregar la columna "Comparación"** en ResultDialog — generaba falsos warnings
-6. **La alerta de fechas de cheque tiene que ser bidireccional** — flag para `< hoy` **y** `> hoy + 180 días`. El parser de fechas infiere el año siguiente cuando la fecha ya pasó, así que un typo en el día se manifiesta como fecha muy futura, no como fecha atrasada
-7. **Todo QDateEdit interactivo debe ignorar la rueda del mouse** — usar `NoScrollDateEdit` (mismo patrón que `NoScrollComboBox`); si no, un scroll accidental cambia el valor
-8. **Después de recompilar el `.exe` verificar el `LastWriteTime` real del binario** — los mensajes de éxito de PyInstaller pueden reportar OK sin haber actualizado el archivo en disco (proceso viejo bloqueando, cache raro). Comparar contra `Get-Date` antes de darlo por cerrado
-9. **Nunca dejar en la lista un proveedor cuya OP volvió `OK`** — el reintento tras error parcial lo reenviaría y duplicaría la OP. Comparar proveedores por `(cuit, nombre)`, nunca por `id()`
-10. **Todo POST enviado invalida el cache de saldos** — no importa el resultado: un timeout puede haber quedado registrado en Finnegans
-11. **Los cortes de red no son errores de API** — `NetworkError` requiere verificación manual (`SIN CONFIRMACION`), no reintento automático
-12. **El «Documento» se normaliza una sola vez, en `dm_reader`** — nunca comparar `item.documento` crudo contra Finnegans ni reimplementar `_es_fc` local: usar `domain/documento.py`
-13. **Si una fila del Excel se descarta, tiene que quedar registrado en `avisos_out`** — los silencios en la lectura son la clase de bug más caro de esta app: nadie se entera hasta que falta un pago
-14. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
+6. **Ningún cheque en alerta puede llegar al POST** — el diálogo deshabilita el botón y `main_window` vuelve a validar con `cheques_en_alerta()`. No sacar ninguna de las dos barreras
+7. **Una fecha inválida en «Forma de pago» genera su cheque marcado, nunca se descarta** — descartarla cambia el fraccionamiento en silencio
+8. **La alerta de fechas de cheque tiene que ser bidireccional** — flag para `< hoy` **y** `> hoy + 180 días`. El parser de fechas infiere el año siguiente cuando la fecha ya pasó, así que un typo en el día se manifiesta como fecha muy futura, no como fecha atrasada
+9. **Todo QDateEdit interactivo debe ignorar la rueda del mouse** — usar `NoScrollDateEdit` (mismo patrón que `NoScrollComboBox`); si no, un scroll accidental cambia el valor
+10. **Después de recompilar el `.exe` verificar el `LastWriteTime` real del binario** — los mensajes de éxito de PyInstaller pueden reportar OK sin haber actualizado el archivo en disco (proceso viejo bloqueando, cache raro). Comparar contra `Get-Date` antes de darlo por cerrado
+11. **Nunca dejar en la lista un proveedor cuya OP volvió `OK`** — el reintento tras error parcial lo reenviaría y duplicaría la OP. Comparar proveedores por `(cuit, nombre)`, nunca por `id()`
+12. **Todo POST enviado invalida el cache de saldos** — no importa el resultado: un timeout puede haber quedado registrado en Finnegans
+13. **Los cortes de red no son errores de API** — `NetworkError` requiere verificación manual (`SIN CONFIRMACION`), no reintento automático
+14. **El «Documento» se normaliza una sola vez, en `dm_reader`** — nunca comparar `item.documento` crudo contra Finnegans ni reimplementar `_es_fc` local: usar `domain/documento.py`
+15. **Si una fila del Excel se descarta, tiene que quedar registrado en `avisos_out`** — los silencios en la lectura son la clase de bug más caro de esta app: nadie se entera hasta que falta un pago
+16. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
 
 ---
 
@@ -365,5 +374,6 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 | 0 | Commit/push de fechas editables + manual de usuario | ✅ hecho |
 | 1 | Riesgo de plata: reenvío duplicado, numeración de cheques, cortes de red | ✅ hecho |
 | 2 | Silencios en la lectura del Excel: amarillo de tema ignorado, `Documento` con formato distinto que descarta al proveedor como "sin saldo", fechas inexistentes (`Ch 31/02`), mensaje de encabezados fila 1, aviso de columna "importe" duplicada | ✅ hecho |
+| 2b | Fechas inexistentes (`Ch 31/02`): generan su cheque marcado en vez de desaparecer; alerta naranja editable y **bloqueo del envío** mientras quede una alerta (regla movida a `domain/alertas_cheque.py`) | ✅ hecho |
 | 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` caen en MANUAL | ⏳ pendiente |
 | 4 | Distribución: versión visible en el título, aviso de versión nueva, firma de código (compra) | ⏳ pendiente |
