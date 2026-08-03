@@ -5,6 +5,7 @@ import pytest
 from src.domain.parser_pago import (
     es_cheque,
     es_transferencia,
+    fechas_descartadas,
     parsear_fechas_col_l,
     transferencia_con_typo,
 )
@@ -89,3 +90,27 @@ class TestEsTransferencia:
     @pytest.mark.parametrize("otro", ["tarjeta", "efectivo", "Ch 08/05", "Cheque"])
     def test_no_transferencia_no_es_typo(self, otro):
         assert not transferencia_con_typo(otro)
+
+
+class TestFechasDescartadas:
+    def test_dia_inexistente_en_el_mes(self):
+        assert fechas_descartadas("Ch 31/02", anio=2026) == ["31/02"]
+
+    def test_mes_inexistente(self):
+        assert fechas_descartadas("Ch 10/13", anio=2026) == ["10/13"]
+
+    def test_convive_con_fechas_validas(self):
+        assert fechas_descartadas("Ch 31/02 - 10/06", anio=2026) == ["31/02"]
+        # y la válida se sigue parseando
+        assert len(parsear_fechas_col_l("Ch 31/02 - 10/06", anio=2026)) == 1
+
+    def test_fechas_validas_no_reportan_nada(self):
+        assert fechas_descartadas("Ch 08/06 - 09/06 - 18/06", anio=2026) == []
+
+    def test_29_de_febrero_segun_el_anio(self):
+        assert fechas_descartadas("Ch 29/02", anio=2026) == ["29/02"]
+        assert fechas_descartadas("Ch 29/02", anio=2028) == []
+
+    def test_texto_sin_fechas(self):
+        assert fechas_descartadas("transferencia") == []
+        assert fechas_descartadas("") == []

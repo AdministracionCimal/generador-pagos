@@ -23,6 +23,7 @@ src/
   config.py               ← config cifrada con Fernet en %APPDATA%
   main.py                 ← entry point PyQt6
   domain/
+    documento.py          ← normaliza «Documento» (FC-21562 → FC - 21562) + es_fc/es_pago
     models.py             ← ItemFactura, ProveedorTanda, ChequeEmitido, OpPago, Modalidad
     clasificador.py       ← asigna CHEQUE_PROPIO / TRANSFERENCIA / MANUAL (por signo + Forma de pago)
     parser_pago.py        ← parsea "Ch 08/05 - 10/05", detecta modalidad, fuzzy match transferencia
@@ -84,6 +85,18 @@ El prefijo (FC, MOVFONDOS, NC, ND, PAGO) ya **no** decide validez ni clasificaci
 ### Validez de fila en `dm_reader`
 
 La única regla de validez es: **fila pintada de amarillo + documento no vacío + proveedor + importe ≠ 0**. No hay whitelist de prefijos.
+
+Amarillo aceptado: `FFFF00` en cualquiera de sus codificaciones (`FFFFFF00`, `00FFFF00`) o `indexed` 5/13 (paleta legacy). Los colores del **tema** no se pueden resolver sin parsear el XML del tema, así que no se aceptan — pero si una fila con datos completos está pintada de un amarillo/dorado distinto o de un color del tema, `leer_dm` lo reporta en `avisos_out` (ver Fase 2 abajo). Antes esas filas se ignoraban en absoluto silencio.
+
+### Normalización de «Documento» (`domain/documento.py`)
+
+`dm_reader` normaliza el documento **una sola vez, al leer**: `" fc -21562 "` → `"FC - 21562"`. De ese texto dependen tres cosas, y las tres fallaban en silencio con un guion sin espacios:
+
+1. `AplicacionOrigen` del POST (a qué documento se aplica el pago)
+2. el match contra `IDENTIFICACIONEXTERNA` de `composicionSaldoProveedor` (si no coincide, el proveedor desaparecía como "sin saldo")
+3. `es_fc()`, que decide la base imponible de las retenciones (un `FC-21562` se pagaba sin retener)
+
+`es_fc()` y `es_pago()` viven acá y los importan `fraccionador`, `retenciones` y `main_window` — antes había dos `_es_fc` duplicados con el mismo bug.
 
 ---
 
@@ -246,6 +259,20 @@ Tres defensas alrededor del POST, todas en `main_window.py`:
 
 Además, los cortes de red se distinguen de los errores de API: `NetworkError` (alias de `httpx.RequestError`, exportado desde `api/client.py`) genera un detalle que arranca con `SIN CONFIRMACION`, porque el POST pudo haber quedado registrado sin que se leyera la respuesta. Ese pago **no** se saca de la lista: requiere verificación manual en Finnegans.
 
+### Avisos de carga del Excel (Fase 2)
+
+`leer_dm(path, avisos_out=[])` acumula avisos a nivel archivo (no atados a un proveedor). `main_window._cargar_excel` los concatena con los `p.avisos` de cada proveedor y los muestra en el `QMessageBox` de "Avisos al cargar el Excel", **antes** de disparar la verificación de saldos (hablan del archivo, no de Finnegans).
+
+Qué avisa hoy:
+
+| Situación | Antes | Ahora |
+|---|---|---|
+| Fila con datos completos pintada de un amarillo no estándar o de un color del tema | se ignoraba en silencio | aviso con el número de fila (hasta 10) |
+| Dos o más columnas cuyo header contiene «importe» | se tomaba la primera en silencio | aviso indicando cuál se usó |
+| Fecha inexistente en «Forma de pago» (`Ch 31/02`) | se descartaba y salía un cheque menos | aviso por texto único (`clasificador` + `parser_pago.fechas_descartadas`) |
+| Faltan columnas requeridas | listado de faltantes | además aclara que los headers van en la **primera** fila y lista lo que leyó ahí |
+| Proveedor auto-eliminado por no tener saldo pendiente | mensaje de 7 s en la barra de estado | `QMessageBox` con la lista y la pista del formato de «Documento» |
+
 ### Auto-limpieza tras envío exitoso
 
 Después de que `ResultDialog` se cierra, si `all(r["estado"] == "OK" for r in resultados)`:
@@ -325,7 +352,9 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 9. **Nunca dejar en la lista un proveedor cuya OP volvió `OK`** — el reintento tras error parcial lo reenviaría y duplicaría la OP. Comparar proveedores por `(cuit, nombre)`, nunca por `id()`
 10. **Todo POST enviado invalida el cache de saldos** — no importa el resultado: un timeout puede haber quedado registrado en Finnegans
 11. **Los cortes de red no son errores de API** — `NetworkError` requiere verificación manual (`SIN CONFIRMACION`), no reintento automático
-12. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
+12. **El «Documento» se normaliza una sola vez, en `dm_reader`** — nunca comparar `item.documento` crudo contra Finnegans ni reimplementar `_es_fc` local: usar `domain/documento.py`
+13. **Si una fila del Excel se descarta, tiene que quedar registrado en `avisos_out`** — los silencios en la lectura son la clase de bug más caro de esta app: nadie se entera hasta que falta un pago
+14. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
 
 ---
 
@@ -335,6 +364,6 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 |---|---|---|
 | 0 | Commit/push de fechas editables + manual de usuario | ✅ hecho |
 | 1 | Riesgo de plata: reenvío duplicado, numeración de cheques, cortes de red | ✅ hecho |
-| 2 | Silencios en la lectura del Excel: amarillo de tema ignorado, `Documento` con formato distinto que descarta al proveedor como "sin saldo", fechas inexistentes (`Ch 31/02`), mensaje de encabezados fila 1, aviso de columna "importe" duplicada | ⏳ pendiente |
+| 2 | Silencios en la lectura del Excel: amarillo de tema ignorado, `Documento` con formato distinto que descarta al proveedor como "sin saldo", fechas inexistentes (`Ch 31/02`), mensaje de encabezados fila 1, aviso de columna "importe" duplicada | ✅ hecho |
 | 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` caen en MANUAL | ⏳ pendiente |
 | 4 | Distribución: versión visible en el título, aviso de versión nueva, firma de código (compra) | ⏳ pendiente |

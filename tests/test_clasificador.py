@@ -91,3 +91,20 @@ class TestClasificar:
         result = clasificar(p)
         assert result.modalidad == Modalidad.TRANSFERENCIA
         assert result.avisos == []
+
+    def test_fecha_inexistente_avisa(self):
+        """«Ch 31/02» se descarta al fraccionar → sale un cheque menos."""
+        p = _proveedor("Ch 31/02 - 10/06")
+        result = clasificar(p)
+        assert result.modalidad == Modalidad.CHEQUE_PROPIO
+        assert len(result.avisos) == 1
+        assert "31/02" in result.avisos[0]
+        assert "menos cheques" in result.avisos[0]
+
+    def test_fechas_validas_no_avisan(self):
+        p = _proveedor("Ch 08/06 - 09/06")
+        assert clasificar(p).avisos == []
+
+    def test_una_sola_alerta_por_texto_repetido(self):
+        p = _proveedor("Ch 31/02", "Ch 31/02", "Ch 31/02")
+        assert len(clasificar(p).avisos) == 1

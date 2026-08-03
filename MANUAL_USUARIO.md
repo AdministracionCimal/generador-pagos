@@ -148,7 +148,8 @@ columnas. Mayúsculas/minúsculas y tildes son indistintas.
 **Cuidados con los encabezados:**
 
 - Si hay **más de una columna con la palabra “importe”** (ej. *Importe original* e *Importe
-  ppal*), la app toma **la de más a la izquierda**. Dejá una sola o poné primero la que se paga.
+  ppal*), la app toma **la de más a la izquierda** y lo avisa al cargar, diciendo cuál usó.
+  Verificá que sea la correcta.
 - La columna de vencimiento debe contener el texto **“fecha vto”**. `Fecha vencimiento` **no**
   se detecta.
 - La columna de modalidad tiene que llamarse **`Forma de pago`** o **`Pago`**. Otros nombres
@@ -162,9 +163,13 @@ filas de referencia sin pintar.
 
 - Alcanza con que **una celda** de la fila esté pintada.
 - Tiene que ser el **amarillo estándar** (`FFFF00`), el de *Colores estándar* de la paleta de
-  Excel. Un amarillo de *Colores del tema* o un amarillo “parecido” **no se detecta** y esa
-  fila se ignora silenciosamente.
-- Si al cargar aparecen menos proveedores de los esperados, el 90 % de las veces es esto.
+  Excel. Un amarillo de *Colores del tema* o un amarillo “parecido” (mostaza, dorado, amarillo
+  claro) **no se procesa**.
+- Si eso pasa, la app **avisa al cargar el archivo** indicando el número de fila: *“N fila(s)
+  con datos completos están pintadas de un color que NO es el amarillo estándar (fila 12, 15)
+  y por eso NO se procesaron”*. Repintá esas filas y volvé a cargar.
+- Si aparecen menos proveedores de los esperados y **no** hubo aviso, la causa es otra:
+  revisá que la fila tenga Documento, Proveedor e Importe distinto de cero.
 
 Además, para que una fila amarilla se tome en cuenta necesita: **Documento** no vacío,
 **Proveedor** no vacío e **Importe distinto de cero**.
@@ -198,8 +203,10 @@ Esto importa de verdad, porque el texto se usa para:
 4. Detectar los **`PAGO - `**, que son los únicos créditos que se mandan igual aunque no
    figuren con saldo pendiente.
 
-Escribir `FC-21562` (sin espacios) hace que la app no la reconozca como factura: se pagaría
-sin calcular retención. **Copiar y pegar desde Finnegans, no tipear a mano.**
+La app corrige sola las diferencias de espaciado y mayúsculas (`fc-21562` se interpreta como
+`FC - 21562`), pero **no** puede adivinar un número mal tipeado ni un prefijo distinto. Lo más
+seguro sigue siendo **copiar y pegar desde Finnegans, no tipear a mano**: si el número no
+coincide con ningún documento con saldo, el proveedor se va a quitar de la lista (con aviso).
 
 Los documentos que empiezan con **`OP`** se descartan siempre (ya son órdenes de pago
 procesadas).
@@ -227,7 +234,7 @@ un MOVFONDOS también puede pagarse en 3 cheques.
 | `Transferencia inmediata` | ❌ No se reconoce → Carga manual |
 | `trans` | ❌ Demasiado corto → Carga manual |
 | `efectivo`, `mercado pago`, `tarjeta` | ❌ Carga manual (correcto: la app no los soporta) |
-| `Ch 31/02` | ⚠️ Fecha inexistente: se ignora y sale **1 cheque con la fecha de la columna Fecha vto**, o con la fecha de hoy si no hay |
+| `Ch 31/02` | ⚠️ Fecha inexistente: se ignora (sale un cheque menos). **La app avisa al cargar** indicando la fecha inválida |
 
 **Las fechas se escriben `dd/mm` sin año.** La app asume el año en curso y, si la fecha ya
 pasó, asume el año siguiente. De ahí el riesgo: hoy 03/08/2026, escribir `Ch 08/05` genera un
@@ -304,11 +311,15 @@ guardarla como `.xlsx`.
 Al cargar, la app:
 
 1. Lee las filas amarillas y arma la lista de proveedores.
-2. Muestra un cartel de **“Verificando saldos”** mientras consulta a Finnegans qué documentos
+2. Si encontró algo raro en el **archivo**, muestra **“Avisos al cargar el Excel”**: filas
+   pintadas con un amarillo que no corresponde, fechas inexistentes, errores de tipeo en
+   “transferencia”, columnas de importe duplicadas. Conviene leerlo y corregir el Excel antes
+   de seguir.
+3. Muestra un cartel de **“Verificando saldos”** mientras consulta a Finnegans qué documentos
    siguen con saldo pendiente. Es bloqueante a propósito: no se puede procesar hasta que termine.
-3. **Elimina automáticamente** los proveedores cuyos documentos ya no tienen saldo (ya
-   pagados). Los nombra en la barra de estado durante unos segundos.
-4. Si detectó errores de tipeo en “transferencia”, muestra la lista para que se corrija el Excel.
+4. **Elimina automáticamente** los proveedores cuyos documentos ya no tienen saldo (ya
+   pagados) y muestra la lista en un cartel, con la pista de revisar el formato de la columna
+   Documento si alguno no debería haberse quitado.
 
 ### Paso 2 — Revisar la chequera
 
@@ -408,7 +419,8 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 
 | Cartel | Cuándo | Qué hacer |
 |---|---|---|
-| **Avisos al cargar el Excel** | Palabra “transferencia” mal escrita | Se interpretó igual, pero conviene corregir el Excel |
+| **Avisos al cargar el Excel** | Filas con un amarillo no estándar, fechas inexistentes, “transferencia” mal escrita, dos columnas de importe | Leer cada línea: dice el número de fila o el texto exacto a corregir. Las filas mal pintadas **no se procesaron** |
+| **Proveedores sin saldo pendiente** | Sus documentos ya no figuran con saldo en Finnegans | Si alguno tendría que pagarse, revisar el formato de la columna Documento |
 | **No se pudo leer el Excel** | Hoja `DM` inexistente, columnas faltantes, archivo `.xls`, archivo corrupto | Ver el detalle del mensaje y la sección 4 |
 | **Sin configuración / Configuración incompleta** | Falta URL, Client ID o Secret | Archivo → Configuración |
 | **Chequera** (“Ingresá el último número…”) | ÚLTIMO Nº vacío o no numérico | Completar el campo |
@@ -431,8 +443,9 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | Síntoma | Causa | Solución |
 |---|---|---|
 | “No se encontró la hoja «DM»” | La hoja tiene otro nombre | Renombrar la hoja a `DM` |
-| “Faltan columnas requeridas” | Encabezado distinto, o los encabezados no están en la fila 1 | Ver la tabla de la sección 4.2 |
-| Carga 0 proveedores | Las filas no están en el amarillo estándar | Repintar con el amarillo de *Colores estándar* |
+| “Faltan columnas requeridas” | Encabezado distinto, o los encabezados no están en la fila 1 | El mensaje lista los encabezados que leyó en la fila 1: comparar con la tabla de la sección 4.2 |
+| Carga 0 proveedores **con aviso** de color | Las filas no están en el amarillo estándar | Repintar con el amarillo de *Colores estándar* |
+| Carga 0 proveedores **sin ningún aviso** | Ninguna fila está pintada, o les falta Documento/Proveedor/Importe | Pintar las filas a pagar y completar los datos |
 | Faltan proveedores que sí están pintados | Documento, Proveedor vacíos o Importe = 0 | Completar la fila |
 | No se puede abrir el archivo | Es `.xls` | Guardar como `.xlsx` |
 | Importes en cero o vacíos | La celda tiene una fórmula sin valor calculado (archivo generado por un sistema, nunca abierto en Excel) | Abrir en Excel, guardar y volver a cargar |
@@ -443,7 +456,7 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 |---|---|---|
 | Un proveedor quedó en Carga manual sin motivo aparente | Texto de forma de pago no reconocido (`Cheque 15/05`, `transferencia bancaria`) | Escribir `Ch dd/mm` o `transferencia` |
 | “Modalidad mixta” | El proveedor mezcla cheque y transferencia | Unificar, o partir en dos tandas |
-| Salen menos cheques de los esperados | Alguna fecha es inexistente (`31/02`) o está mal escrita | Corregir las fechas |
+| Salen menos cheques de los esperados | Alguna fecha es inexistente (`31/02`) o está mal escrita | Corregir las fechas; la app avisa cuál al cargar |
 | Un cheque quedó con fecha de hoy | La forma de pago no traía fechas y se usó la fecha de respaldo | Corregir la fecha en la pantalla previa |
 | Un cheque salió al año que viene | Fecha `dd/mm` ya pasada: la app asume el año siguiente | Corregirla en la pantalla previa (banner naranja) |
 | Los números de cheque no coinciden con la chequera física | ÚLTIMO Nº desactualizado | Corregir el campo antes de procesar |
@@ -557,8 +570,9 @@ Porque no tiene la retención configurada en Finnegans, porque no hay facturas `
 tanda, o porque la base no supera el mínimo imponible.
 
 **¿Por qué desapareció un proveedor de la lista?**
-Porque sus documentos no figuran con saldo pendiente. Si estás seguro de que se debe,
-revisá que la columna Documento tenga el formato exacto de Finnegans (sección 4.5).
+Porque sus documentos no figuran con saldo pendiente en Finnegans. La app te lo dice en un
+cartel al terminar de verificar saldos. Si estás seguro de que se debe, revisá que el número
+de la columna Documento sea el correcto (sección 4.5).
 
 **¿Necesito instalar Python o Excel?**
 No. El `.exe` trae todo. Excel sólo hace falta para editar la planilla.

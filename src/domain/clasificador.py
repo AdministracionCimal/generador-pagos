@@ -1,7 +1,12 @@
 from decimal import Decimal
 
 from .models import Modalidad, ProveedorTanda
-from .parser_pago import es_cheque, es_transferencia, transferencia_con_typo
+from .parser_pago import (
+    es_cheque,
+    es_transferencia,
+    fechas_descartadas,
+    transferencia_con_typo,
+)
 
 _DOCS_IGNORAR = {"op"}    # ya procesadas por Finnegans → se eliminan
 
@@ -32,6 +37,20 @@ def clasificar(proveedor: ProveedorTanda) -> ProveedorTanda:
         proveedor.avisos.append(
             f"«{txt}» se interpretó como «transferencia» — revisá la ortografía en el Excel"
         )
+
+    # Fechas inexistentes (ej. «Ch 31/02»): se descartan al fraccionar, así que
+    # el proveedor sale con menos cheques de los que dice el Excel.
+    fechas_malas = {
+        (i.modalidad_pago, tuple(fechas_descartadas(i.modalidad_pago)))
+        for i in items_reales
+        if es_cheque(i.modalidad_pago)
+    }
+    for texto, invalidas in sorted(fechas_malas):
+        if invalidas:
+            proveedor.avisos.append(
+                f"«{texto}»: {', '.join(invalidas)} no existe como fecha y se ignoró "
+                f"— se van a emitir menos cheques de los previstos"
+            )
 
     todos_cheque = all(es_cheque(t) for t in textos_l)
     todos_transf = all(es_transferencia(t) for t in textos_l)

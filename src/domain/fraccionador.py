@@ -2,12 +2,9 @@ from dataclasses import replace as _dc_replace
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+from .documento import es_fc as _es_fc
 from .models import ChequeEmitido, ItemFactura
 from .parser_pago import parsear_fechas_col_l
-
-
-def _es_fc(documento: str) -> bool:
-    return documento.strip().lower().startswith("fc -")
 
 
 def fraccionar_item(

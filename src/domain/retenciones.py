@@ -16,11 +16,8 @@ Fórmula con acumulado (igual que el SP CalculoRetencionesModoBatchTesoreria):
 from dataclasses import replace
 from decimal import Decimal, ROUND_HALF_UP
 
+from .documento import es_fc as _es_fc
 from .models import ItemFactura
-
-
-def _es_fc(documento: str) -> bool:
-    return documento.strip().lower().startswith("fc -")
 
 
 def calcular_importe_retencion(ret_data: dict, base_neto: Decimal) -> Decimal:

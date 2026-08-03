@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 import src.config as config
 from src.api.client import ApiError, AuthError, FinnegansClient, NetworkError
 from src.domain.clasificador import clasificar
+from src.domain.documento import es_fc, es_pago, normalizar as normalizar_doc
 from src.domain.fraccionador import fraccionar_proveedor
 from src.domain.mapper import armar_post
 from src.domain.models import Modalidad, OpPago, ProveedorTanda
@@ -293,7 +294,7 @@ class _PrecargarWorker(QThread):
                     docs_to_fetch = []
                     for item in p.items:
                         doc = item.documento
-                        if not doc.lower().startswith("fc -"):
+                        if not es_fc(doc):
                             continue
                         with lock:
                             already_ratio = doc in ratios_fc
@@ -343,7 +344,7 @@ class _PrecargarWorker(QThread):
                 try:
                     rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
                     return cuit, {
-                        r["IDENTIFICACIONEXTERNA"]
+                        normalizar_doc(r["IDENTIFICACIONEXTERNA"])
                         for r in rows
                         if r.get("IDENTIFICACIONEXTERNA")
                         and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
@@ -427,7 +428,7 @@ class _SaldoCheckerWorker(QThread):
                 try:
                     rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
                     return cuit, {
-                        r["IDENTIFICACIONEXTERNA"]
+                        normalizar_doc(r["IDENTIFICACIONEXTERNA"])
                         for r in rows
                         if r.get("IDENTIFICACIONEXTERNA")
                         and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
@@ -797,7 +798,8 @@ class MainWindow(QMainWindow):
             if (p.cuit
                     and docs_pendientes.get(p.cuit) is not None
                     and p.items
-                    and all(i.documento not in docs_pendientes[p.cuit] for i in p.items)):
+                    and all(normalizar_doc(i.documento) not in docs_pendientes[p.cuit]
+                            for i in p.items)):
                 removidos.append(p.nombre)
             else:
                 nuevos.append(p)
@@ -808,6 +810,20 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Eliminados {len(removidos)} sin saldo pendiente: {', '.join(removidos)}.",
                 7000,
+            )
+            # Antes esto sólo aparecía 7 s en la barra de estado: si el Documento
+            # del Excel no coincide con el de Finnegans, el proveedor desaparecía
+            # sin que nadie lo viera.
+            QMessageBox.information(
+                self,
+                "Proveedores sin saldo pendiente",
+                f"{len(removidos)} proveedor(es) se quitaron de la lista porque sus "
+                f"documentos ya no tienen saldo pendiente en Finnegans:\n\n"
+                + "\n".join(f"  • {n}" for n in removidos[:15])
+                + ("\n  • …" if len(removidos) > 15 else "")
+                + "\n\nSi alguno tendría que pagarse, revisá que la columna "
+                  "«Documento» tenga el mismo formato que Finnegans "
+                  "(ej. «FC - 21562»).",
             )
         else:
             self.statusBar().showMessage("Saldos verificados — todos con saldo pendiente.", 3000)
@@ -895,17 +911,19 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            self._proveedores = leer_dm(Path(path))
+            avisos_archivo: list[str] = []
+            self._proveedores = leer_dm(Path(path), avisos_out=avisos_archivo)
             self._lbl_archivo.setText(Path(path).name)
             self._lbl_archivo.setObjectName("Filename")
             self._lbl_archivo.style().unpolish(self._lbl_archivo)
             self._lbl_archivo.style().polish(self._lbl_archivo)
             self._poblar_tabla()
             self._guardar_datos_chequera()
-            if config.is_configured(self._cfg):
-                self._iniciar_saldo_checker()
-            # Avisos no-fatales (typos en modalidad de pago, etc.)
-            avisos_carga = [
+
+            # Avisos no-fatales (filas mal pintadas, typos en modalidad, fechas
+            # inexistentes). Van antes de la verificación de saldos: hablan del
+            # archivo, no de Finnegans.
+            avisos_carga = avisos_archivo + [
                 f"• {p.nombre}: {a}"
                 for p in self._proveedores for a in p.avisos
             ]
@@ -916,6 +934,9 @@ class MainWindow(QMainWindow):
                     "Se detectaron observaciones que conviene revisar:\n\n"
                     + "\n".join(avisos_carga),
                 )
+
+            if config.is_configured(self._cfg):
+                self._iniciar_saldo_checker()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo leer el Excel:\n{e}")
 
@@ -1334,13 +1355,13 @@ class MainWindow(QMainWindow):
             if pendientes is not None:
                 items_sin_saldo = [
                     i for i in p.items
-                    if i.documento not in pendientes
-                    and not i.documento.lower().startswith("pago -")
+                    if normalizar_doc(i.documento) not in pendientes
+                    and not es_pago(i.documento)
                 ]
                 items_base = [
                     i for i in p.items
-                    if i.documento in pendientes
-                    or i.documento.lower().startswith("pago -")
+                    if normalizar_doc(i.documento) in pendientes
+                    or es_pago(i.documento)
                 ]
                 for item in items_sin_saldo:
                     self._ops_advertencias.append(
@@ -1562,7 +1583,10 @@ class MainWindow(QMainWindow):
             pendientes = docs_pendientes.get(prov.cuit)
             if pendientes is None:
                 continue  # fail-open: no cambiar estado
-            sin_saldo = [i for i in prov.items if i.documento not in pendientes]
+            sin_saldo = [
+                i for i in prov.items
+                if normalizar_doc(i.documento) not in pendientes
+            ]
             if sin_saldo and len(sin_saldo) == len(prov.items):
                 label, variant = _ESTADOS["YA_PAGADA"]
                 self._tabla.setCellWidget(row, 6, theme.make_badge(label, variant))

@@ -53,6 +53,24 @@ def parsear_fechas_col_l(
     return fechas
 
 
+def fechas_descartadas(texto: str, anio: int | None = None) -> list[str]:
+    """Tokens `dd/mm` del texto que no existen como fecha (ej. `31/02`).
+
+    `parsear_fechas_col_l` los ignora, así que el proveedor terminaba con un
+    cheque menos sin que nadie se enterara. Esto permite avisarlo al cargar.
+    """
+    if anio is None:
+        anio = date.today().year
+    invalidas: list[str] = []
+    for m in _RE_FECHA.finditer(texto or ""):
+        dia, mes = int(m.group(1)), int(m.group(2))
+        try:
+            date(anio, mes, dia)
+        except ValueError:
+            invalidas.append(m.group(0))
+    return invalidas
+
+
 def es_cheque(texto: str) -> bool:
     t = (texto or "").strip().lower()
     return bool(re.search(r"\bch\s*\d", t))
