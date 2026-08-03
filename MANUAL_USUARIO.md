@@ -343,9 +343,11 @@ Botón **Procesar pagos**. La app consulta retenciones, cotización del dólar y
 Acá pueden aparecer, en este orden:
 
 1. **Cotización del dólar no disponible** → se puede continuar (usa $1) o cancelar.
-2. **Chequera insuficiente** → elegir otra chequera para los proveedores que no entraron, o
+2. **Último número de cheque distinto** → el número del sistema no coincide con el del campo
+   ÚLTIMO Nº; hay que elegir con cuál emitir.
+3. **Chequera insuficiente** → elegir otra chequera para los proveedores que no entraron, o
    omitirlos.
-3. **Proveedores omitidos** → lista de lo que quedó afuera y por qué (CUIT inválido, sin
+4. **Proveedores omitidos** → lista de lo que quedó afuera y por qué (CUIT inválido, sin
    saldo, importe cero, sin chequera).
 
 ### Paso 5 — Verificación previa (la pantalla más importante)
@@ -385,8 +387,8 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 
 - Si **todas** las OPs salieron OK: la app actualiza el ÚLTIMO Nº de la chequera y **limpia
   la planilla y la tabla** (“Sin archivo cargado”), para que no se reenvíe por error.
-- Si **alguna falló**: la lista **queda cargada** para poder reintentar. Ver la advertencia de
-  la sección 10.1 antes de volver a apretar Procesar.
+- Si **alguna falló**: la app deja en la lista **sólo los pagos que no se confirmaron** (saca
+  los que salieron OK) y vuelve a verificar los saldos en el próximo intento. Ver sección 10.1.
 
 ---
 
@@ -415,6 +417,7 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | **Sin chequeras disponibles** | No hay otra chequera cargada | Cargar chequeras y volver a intentar |
 | **Proveedores omitidos** | CUIT inválido, sin saldo, importe cero | Revisar cada caso; esos pagos **no se enviaron** |
 | **Nada que procesar** | Ningún pago quedó en estado Listo | Revisar estados en la tabla |
+| **Último número de cheque distinto** | Finnegans informa otro último cheque emitido que el del campo ÚLTIMO Nº | **Sí** = emitir desde el número de Finnegans (elegir esto si otra persona usó la chequera). **No** = seguir con el de la app (correcto si se saltearon cheques anulados a propósito). **Cancelar** = revisar antes de procesar |
 | **Cheques con fecha sospechosa** (banner naranja) | Cheque a hoy o antes, o a más de 180 días | Corregir la fecha en la misma tabla |
 | **No se pudo cargar chequeras** | Sin conexión o credenciales inválidas | Probar conexión en Configuración |
 | **⚠ *proveedor*: no se pudo cargar histórico de retenciones** | Falló la consulta del mes | **Atención:** la retención puede quedar calculada de menos. Verificar antes de confirmar |
@@ -453,11 +456,12 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | *El usuario sólo tiene permisos de consulta sobre esta empresa* | El usuario de la API no tiene alta habilitada, o la empresa seleccionada no es la correcta | Pedir permisos de alta a Sistemas; verificar la Empresa en Configuración |
 | `HTTP 500 … No se permiten importes negativos` | Composición de importes inconsistente (caso conocido y corregido) | Revisar signos en el Excel; si persiste, reportar con el log de auditoría |
 | `HTTP 500` genérico de contabilidad | Cuenta contable, talonario u operación bancaria mal configurados | Revisar Configuración con contabilidad |
-| Timeout / error de red | Internet o Finnegans caído | Reintentar más tarde. **Antes de reintentar, verificar en Finnegans si la OP se creó** |
+| `SIN CONFIRMACION: se corto la conexion al enviar…` | Timeout o caída de red durante el envío | La OP **puede haber quedado creada**. Buscarla en Finnegans: si está, eliminar esa fila de la tabla; si no está, reintentar |
 
-> **Importante con los timeouts:** si se corta la conexión justo después de enviar, la OP
-> puede haber quedado creada en Finnegans aunque la app la muestre con error. Siempre
-> verificar en el sistema antes de reintentar ese pago.
+> **Importante con los timeouts:** cuando se corta la conexión justo después de enviar, la app
+> no puede saber si la OP se registró. Por eso marca ese pago con **SIN CONFIRMACIÓN** en lugar
+> de un error común: es el único caso en el que hay que ir a mirar el sistema antes de
+> reintentar.
 
 ### 9.4 La aplicación
 
@@ -473,27 +477,30 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 
 ## 10. Buenas prácticas y riesgos operativos
 
-### 10.1 Reintento después de un error parcial (⚠️ riesgo de pago duplicado)
+### 10.1 Reintento después de un error parcial
 
-Si de 10 OPs 8 salieron OK y 2 fallaron, la lista **queda entera**. Si se aprieta *Procesar
-pagos* de nuevo dentro de los 15 minutos, la app reutiliza la verificación de saldos anterior
-y **puede volver a enviar las 8 que ya salieron**, generando OPs duplicadas.
+Si de 10 OPs 8 salieron OK y 2 fallaron, la app **saca solas de la lista las 8 confirmadas** y
+deja únicamente las 2 que hay que reintentar (lo avisa en la barra de estado). Además descarta
+la verificación de saldos anterior, así que el próximo *Procesar pagos* vuelve a consultar a
+Finnegans desde cero. **No hay que borrar filas a mano.**
 
-**Antes de reintentar, hacer una de estas tres cosas:**
-
-1. Tildar en la tabla las filas que salieron OK y **Eliminar seleccionados** (recomendado); o
-2. **Volver a cargar el Excel** (así se revalidan los saldos contra Finnegans y las ya pagadas
-   se descartan solas); o
-3. Esperar más de 15 minutos.
+Lo único que requiere criterio humano es el caso **SIN CONFIRMACIÓN**: cuando se corta la
+conexión al enviar, la app no sabe si la OP quedó creada, así que la deja en la lista y lo dice
+en el detalle del resultado. En ese caso, **antes de reintentar hay que buscar el pago en
+Finnegans**: si ya está, eliminá esa fila de la tabla; si no está, reintentá normalmente.
 
 ### 10.2 Dos personas usando la app al mismo tiempo
 
-La numeración de **cheques** la controla la app a partir del ÚLTIMO Nº. Si dos usuarios
-procesan pagos con **la misma chequera** en simultáneo, pueden emitir **cheques con el mismo
-número**. La numeración de la **OP**, en cambio, la controla Finnegans y no tiene ese problema.
+La numeración de **cheques** la controla la app a partir del ÚLTIMO Nº (la de la **OP** la
+controla Finnegans y no tiene este problema). Si dos usuarios trabajan con la misma chequera,
+podrían emitir cheques con el mismo número.
 
-**Regla:** una sola persona por chequera y por tanda. Si hay varios usuarios, asignar una
-chequera distinta a cada uno.
+Antes de armar los pagos, la app le pregunta a Finnegans cuál es el último cheque emitido y,
+si no coincide con el campo ÚLTIMO Nº, **muestra los dos números y pide decidir** (usar el de
+Finnegans, seguir con el de la app, o cancelar). Ver el detalle en la sección 8.
+
+Eso detecta el problema, pero no lo evita: **la regla sigue siendo una persona por chequera y
+por tanda**. Si hay varios usuarios, asignar una chequera distinta a cada uno.
 
 ### 10.3 Rutina recomendada
 

@@ -99,7 +99,7 @@ La única regla de validez es: **fila pintada de amarillo + documento no vacío 
 7. `_asignar_numeros_op()` → calcula `numero_comprobante_estimado`
 8. `PreviewDialog` → el usuario confirma; puede **editar la fecha de vencimiento de cada cheque** in-line (mutación directa sobre `ChequeEmitido.fecha_vencimiento`, que llega al POST sin pasos extra). Filas con fecha < hoy o > hoy + 180 días se pintan de naranja y aparece un banner con el conteo
 9. `_ProcesarWorker` (QThread, **serial intencionalmente**): POST por cada OP → `ResultDialog`
-10. `_on_terminado` → actualiza ÚLTIMO Nº de la chequera principal. Si **todos** los resultados fueron OK, `_limpiar_tras_envio_exitoso` vacía `_proveedores`, `_ops_a_procesar`, restaura el label del archivo y repuebla la tabla vacía (evita reenvíos accidentales)
+10. `_on_terminado` → invalida el cache de saldos siempre (cualquier POST pudo haber quedado registrado) y actualiza ÚLTIMO Nº de la chequera principal. Si **todos** los resultados fueron OK, `_limpiar_tras_envio_exitoso` vacía `_proveedores`, `_ops_a_procesar`, restaura el label del archivo y repuebla la tabla vacía. Si hubo errores parciales, `_quitar_confirmados` saca de `_proveedores` los que volvieron OK (evita el reenvío duplicado en el reintento)
 
 ---
 
@@ -236,6 +236,16 @@ Motivación: cheque emitido a **06/05/2027** cuando se quiso poner 06/06/2026 (t
 - Banner superior con conteo total de cheques en alerta que se refresca en vivo al editar
 - Al editar la fecha, `_on_cheque_date_changed` muta `ChequeEmitido.fecha_vencimiento` directamente — `_ProcesarWorker` recibe la misma referencia y el POST envía el valor corregido
 
+### Protecciones contra reenvío duplicado (Fase 1)
+
+Tres defensas alrededor del POST, todas en `main_window.py`:
+
+1. **Reintento tras error parcial** — `proveedores_pendientes()` (función pura, testeada) saca de la lista los proveedores cuya OP volvió `OK`. Compara por `(cuit, nombre)`, **no por `id()`**: `_construir_ops` puede haber creado una copia con `dataclasses.replace` al filtrar ítems sin saldo. `_on_terminado` la usa vía `_quitar_confirmados` en la rama de error parcial.
+2. **Cache de saldos invalidado siempre** — al terminar el envío, `_docs_pendientes_cache = None` y `_docs_pendientes_ts = 0.0`. Sin esto, el TTL de 15 min mostraba como pendientes documentos recién pagados.
+3. **Numeración de cheques desfasada** — `_PrecargarWorker` trae el `NumeroActual` de la chequera configurada y `_confirmar_ultimo_cheque` compara contra el campo ÚLTIMO Nº (`numero_cheque_desfasado()`, función pura). Si difieren, diálogo Sí/No/Cancelar: usar el del ERP (otro usuario emitió), seguir con el de la app (se saltearon cheques anulados) o abortar. Sólo se pregunta si hay al menos un proveedor en modalidad `CHEQUE_PROPIO`.
+
+Además, los cortes de red se distinguen de los errores de API: `NetworkError` (alias de `httpx.RequestError`, exportado desde `api/client.py`) genera un detalle que arranca con `SIN CONFIRMACION`, porque el POST pudo haber quedado registrado sin que se leyera la respuesta. Ese pago **no** se saca de la lista: requiere verificación manual en Finnegans.
+
 ### Auto-limpieza tras envío exitoso
 
 Después de que `ResultDialog` se cierra, si `all(r["estado"] == "OK" for r in resultados)`:
@@ -312,3 +322,19 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 6. **La alerta de fechas de cheque tiene que ser bidireccional** — flag para `< hoy` **y** `> hoy + 180 días`. El parser de fechas infiere el año siguiente cuando la fecha ya pasó, así que un typo en el día se manifiesta como fecha muy futura, no como fecha atrasada
 7. **Todo QDateEdit interactivo debe ignorar la rueda del mouse** — usar `NoScrollDateEdit` (mismo patrón que `NoScrollComboBox`); si no, un scroll accidental cambia el valor
 8. **Después de recompilar el `.exe` verificar el `LastWriteTime` real del binario** — los mensajes de éxito de PyInstaller pueden reportar OK sin haber actualizado el archivo en disco (proceso viejo bloqueando, cache raro). Comparar contra `Get-Date` antes de darlo por cerrado
+9. **Nunca dejar en la lista un proveedor cuya OP volvió `OK`** — el reintento tras error parcial lo reenviaría y duplicaría la OP. Comparar proveedores por `(cuit, nombre)`, nunca por `id()`
+10. **Todo POST enviado invalida el cache de saldos** — no importa el resultado: un timeout puede haber quedado registrado en Finnegans
+11. **Los cortes de red no son errores de API** — `NetworkError` requiere verificación manual (`SIN CONFIRMACION`), no reintento automático
+12. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
+
+---
+
+## Estado de Fases (plan post-manual, 2026-08-03)
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| 0 | Commit/push de fechas editables + manual de usuario | ✅ hecho |
+| 1 | Riesgo de plata: reenvío duplicado, numeración de cheques, cortes de red | ✅ hecho |
+| 2 | Silencios en la lectura del Excel: amarillo de tema ignorado, `Documento` con formato distinto que descarta al proveedor como "sin saldo", fechas inexistentes (`Ch 31/02`), mensaje de encabezados fila 1, aviso de columna "importe" duplicada | ⏳ pendiente |
+| 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` caen en MANUAL | ⏳ pendiente |
+| 4 | Distribución: versión visible en el título, aviso de versión nueva, firma de código (compra) | ⏳ pendiente |

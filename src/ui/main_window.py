@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 import src.config as config
-from src.api.client import ApiError, AuthError, FinnegansClient
+from src.api.client import ApiError, AuthError, FinnegansClient, NetworkError
 from src.domain.clasificador import clasificar
 from src.domain.fraccionador import fraccionar_proveedor
 from src.domain.mapper import armar_post
@@ -40,6 +40,40 @@ def _hint(text: str) -> QLabel:
 @functools.lru_cache(maxsize=512)
 def _fmt_money(value: Decimal | float | int) -> str:
     return f"$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _clave_proveedor(p) -> tuple[str, str]:
+    """Identidad estable de un proveedor.
+
+    No sirve comparar por `id()`: `_construir_ops` puede haber creado una copia
+    con `dataclasses.replace` al filtrar ítems sin saldo.
+    """
+    return (p.cuit or "", p.nombre)
+
+
+def proveedores_pendientes(proveedores: list, ops: list, resultados: list) -> list:
+    """Proveedores que quedan por enviar: saca los que ya tienen OP registrada OK.
+
+    Tras un error parcial la lista se conserva para reintentar. Si los exitosos
+    siguieran ahí, el reintento los volvería a enviar y duplicaría la OP en
+    Finnegans (el cache de saldos los seguiría mostrando como pendientes).
+    """
+    confirmados = {
+        _clave_proveedor(op.proveedor)
+        for op, res in zip(ops, resultados)
+        if res.get("estado") == "OK"
+    }
+    return [p for p in proveedores if _clave_proveedor(p) not in confirmados]
+
+
+def numero_cheque_desfasado(ultimo_erp: str, ultimo_app: int) -> int | None:
+    """Último número de cheque que informa Finnegans cuando difiere del cargado
+    en la app; None si coinciden o si el dato del ERP no es utilizable."""
+    try:
+        numero_erp = int(str(ultimo_erp).strip())
+    except (TypeError, ValueError):
+        return None
+    return numero_erp if numero_erp != ultimo_app else None
 
 
 _ESTADOS = {
@@ -131,7 +165,7 @@ class _CheckHeader(QHeaderView):
 
 class _PrecargarWorker(QThread):
     progreso = pyqtSignal(str)
-    listo    = pyqtSignal(object, object, object, object, object, object)  # cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback, ultimo_op
+    listo    = pyqtSignal(object, object, object, object, object, object, object)  # cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback, ultimo_op, ultimo_cheque_erp
     error    = pyqtSignal(str)
 
     def __init__(self, proveedores: list, cfg: dict, cache_docs: dict | None = None) -> None:
@@ -162,6 +196,17 @@ class _PrecargarWorker(QThread):
                 ultimo_op = str(detalle_op.get("NumeroActual", "") or "").strip()
             except Exception:
                 ultimo_op = ""
+
+        # Último cheque emitido según Finnegans. Si no coincide con el campo de
+        # la app, otra persona pudo haber emitido con la misma chequera.
+        ultimo_cheque_erp = ""
+        chequera = str(cfg.get("chequera_codigo", "") or "").strip()
+        if chequera:
+            try:
+                detalle_cheq = client.get_talonario(chequera)
+                ultimo_cheque_erp = str(detalle_cheq.get("NumeroActual", "") or "").strip()
+            except Exception:
+                ultimo_cheque_erp = ""
 
         cache: dict = {}
         codigos_ret_cargados: dict = {}
@@ -320,6 +365,7 @@ class _PrecargarWorker(QThread):
             docs_pendientes,
             cotizacion_fallback,
             ultimo_op,
+            ultimo_cheque_erp,
         )
 
 
@@ -438,6 +484,25 @@ class _ProcesarWorker(QThread):
                     "nombre": nombre,
                     "estado": "ERROR",
                     "detalle": str(e),
+                    "numero_previsto": op.numero_comprobante_estimado,
+                    "numero_real": "",
+                    "importe": float(op.proveedor.importe_total),
+                })
+            except NetworkError as e:
+                # La conexión se cortó: el POST pudo haber quedado registrado en
+                # Finnegans sin que hayamos leído la respuesta. Reintentar a
+                # ciegas duplicaría la OP.
+                detalle = (
+                    "SIN CONFIRMACION: se corto la conexion al enviar. "
+                    "Verificar en Finnegans si la OP quedo creada ANTES de reintentar "
+                    f"({type(e).__name__})"
+                )
+                _LOG.warning("POST sin confirmacion para %s: %r", nombre, e)
+                self.progreso.emit(i, detalle)
+                resultados.append({
+                    "nombre": nombre,
+                    "estado": "ERROR",
+                    "detalle": detalle,
                     "numero_previsto": op.numero_comprobante_estimado,
                     "numero_real": "",
                     "importe": float(op.proveedor.importe_total),
@@ -1057,6 +1122,7 @@ class MainWindow(QMainWindow):
         docs_pendientes,
         cotizacion_fallback,
         ultimo_op,
+        ultimo_cheque_erp="",
     ) -> None:
         self._progress.setRange(0, 100)
         self._progress.setVisible(False)
@@ -1077,6 +1143,13 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 self._btn_procesar.setEnabled(True)
                 return
+
+        hay_cheques = any(
+            p.modalidad == Modalidad.CHEQUE_PROPIO for p in self._proveedores
+        )
+        if hay_cheques and not self._confirmar_ultimo_cheque(ultimo_cheque_erp):
+            self._btn_procesar.setEnabled(True)
+            return
 
         self._construir_ops(self._ultimo_cheque, cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes)
         self._actualizar_estados_post_precarga(docs_pendientes)
@@ -1118,6 +1191,51 @@ class MainWindow(QMainWindow):
         self._worker.progreso.connect(self._on_progreso)
         self._worker.terminado.connect(self._on_terminado)
         self._worker.start()
+
+    def _confirmar_ultimo_cheque(self, ultimo_cheque_erp: str) -> bool:
+        """True si se puede seguir procesando.
+
+        Si Finnegans informa otro último número de cheque que el cargado en la
+        app, hay que decidir: dos personas emitiendo con la misma chequera
+        generarían cheques con números repetidos.
+        """
+        numero_erp = numero_cheque_desfasado(ultimo_cheque_erp, self._ultimo_cheque)
+        if numero_erp is None:
+            return True
+
+        chequera = self._combo_cheq.currentText().strip() or "la chequera seleccionada"
+        if numero_erp > self._ultimo_cheque:
+            detalle = (
+                "Puede que otra persona haya emitido cheques con esta chequera. "
+                "Seguir con el número de la app generaría cheques repetidos."
+            )
+        else:
+            detalle = (
+                "El número de la app está más adelante que el del sistema "
+                "(pasa, por ejemplo, si se saltearon cheques anulados)."
+            )
+
+        reply = QMessageBox.question(
+            self,
+            "Último número de cheque distinto",
+            f"Finnegans informa que el último cheque emitido de «{chequera}» es "
+            f"<b>{numero_erp}</b>, pero en la app figura <b>{self._ultimo_cheque}</b>."
+            f"<br><br>{detalle}<br><br>"
+            f"<b>Sí</b>: emitir desde {numero_erp} (el de Finnegans).<br>"
+            f"<b>No</b>: emitir desde {self._ultimo_cheque} (el de la app).<br>"
+            f"<b>Cancelar</b>: no procesar y revisar la chequera.",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.Yes:
+            self._ultimo_cheque = numero_erp
+            self._inp_cheq_ultimo.setText(str(numero_erp))
+            self._guardar_datos_chequera()
+        return True
 
     def _on_checkbox_toggled(self, _checked: bool) -> None:
         if self._actualizando_tabla:
@@ -1460,6 +1578,12 @@ class MainWindow(QMainWindow):
         self._lbl_progreso.setVisible(False)
         self._btn_procesar.setEnabled(True)
 
+        # Cualquier POST enviado pudo haber quedado registrado en Finnegans
+        # (incluso los que cortaron por red), así que el cache de saldos deja de
+        # ser confiable: forzar reconsulta en el próximo "Procesar pagos".
+        self._docs_pendientes_cache = None
+        self._docs_pendientes_ts = 0.0
+
         # Auto-actualizar "Último Nº" solo con cheques de la chequera principal
         chequera_principal = self._combo_cheq.currentData() or self._combo_cheq.currentText().strip()
         ultimo_exitoso = self._ultimo_cheque
@@ -1487,6 +1611,28 @@ class MainWindow(QMainWindow):
         # ya estaban aparte), limpiar Excel y tabla para evitar reenvío.
         if resultados and all(r.get("estado") == "OK" for r in resultados):
             self._limpiar_tras_envio_exitoso()
+        else:
+            self._quitar_confirmados(resultados)
+
+    def _quitar_confirmados(self, resultados: list) -> None:
+        """Saca de la lista los pagos que Finnegans ya confirmó.
+
+        Se llama cuando hubo errores parciales: la lista queda cargada para
+        reintentar, pero sin los que ya se registraron.
+        """
+        quedan = proveedores_pendientes(
+            self._proveedores, self._ops_a_procesar, resultados
+        )
+        quitados = len(self._proveedores) - len(quedan)
+        if not quitados:
+            return
+        self._proveedores = quedan
+        self._poblar_tabla()
+        self.statusBar().showMessage(
+            f"{quitados} pago(s) ya confirmados se quitaron de la lista. "
+            f"Quedan {len(self._proveedores)} para revisar antes de reintentar.",
+            8000,
+        )
 
     def _limpiar_tras_envio_exitoso(self) -> None:
         self._proveedores = []

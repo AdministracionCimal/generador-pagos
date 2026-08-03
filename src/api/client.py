@@ -15,6 +15,11 @@ class AuthError(Exception):
     pass
 
 
+# Errores de red/timeout: el POST pudo haber llegado a Finnegans sin que
+# lleguemos a leer la respuesta, así que se tratan distinto de un ApiError.
+NetworkError = httpx.RequestError
+
+
 class ApiError(Exception):
     def __init__(self, status: int, body: str) -> None:
         super().__init__(f"HTTP {status}: {body}")
