@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 
 import src.config as config
 from src.ui import theme
+from src.version import etiqueta_larga
 
 
 class _SettingsLoader(QThread):
@@ -93,7 +94,7 @@ class SettingsDialog(QDialog):
         title.setObjectName("PageTitle")
         subtitle = QLabel(
             "Credenciales de la API Finnegans y cuentas por defecto. "
-            "Se guardan cifradas en este equipo."
+            "Se guardan cifradas en este equipo.  ·  " + etiqueta_larga()
         )
         subtitle.setObjectName("PageSubtitle")
         subtitle.setWordWrap(True)

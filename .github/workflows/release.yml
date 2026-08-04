@@ -21,6 +21,29 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt pyinstaller
 
+      # El .exe tiene que saber de qué commit salió: la app compara ese commit
+      # contra el que declara el release para detectar si hay versión nueva.
+      - name: Estampar build en version.py
+        id: sello
+        shell: bash
+        run: |
+          python - "$GITHUB_SHA" <<'PY'
+          import datetime, io, re, sys
+          sha = sys.argv[1]
+          fecha = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+          ruta = "src/version.py"
+          texto = io.open(ruta, encoding="utf-8").read()
+          texto = re.sub(r'BUILD_SHA = ".*"',  f'BUILD_SHA = "{sha}"',    texto)
+          texto = re.sub(r'BUILD_DATE = ".*"', f'BUILD_DATE = "{fecha}"', texto)
+          io.open(ruta, "w", encoding="utf-8").write(texto)
+          PY
+          VERSION=$(python -c "import src.version as v; print(v.VERSION)")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          python -c "import src.version as v; print('sello:', v.etiqueta_larga())"
+
+      - name: Tests
+        run: python -m pytest tests/ -q
+
       - name: Compilar .exe
         run: pyinstaller GeneradorDePagos.spec --noconfirm
 
@@ -34,8 +57,11 @@ jobs:
 
             Descargá **GeneradorDePagos.exe** y ejecutalo directamente — no requiere instalación ni Python.
 
+            Si ya la tenés instalada, no hace falta bajar nada: la app avisa sola y se actualiza desde
+            **Ayuda → Buscar actualizaciones**.
+
             ---
-            Compilado automáticamente desde el commit `${{ github.sha }}`.
+            Versión: ${{ steps.sello.outputs.version }} · commit: `${{ github.sha }}`
           artifacts: dist/GeneradorDePagos.exe
           allowUpdates: true
           removeArtifacts: true

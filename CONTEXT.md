@@ -37,8 +37,10 @@ src/
   api/
     client.py             ← FinnegansClient (OAuth + GET/POST); AuthError, ApiError
     endpoints.py          ← URLs de cada endpoint Finnegans
+  version.py              ← VERSION a mano; BUILD_SHA/BUILD_DATE los estampa el CI
   util/
     audit.py              ← log persistente JSONL de request/response Finnegans
+    actualizacion.py      ← chequeo del release, descarga verificada y swap del .exe
   ui/
     main_window.py        ← ventana principal, worker threads paralelos
     preview_dialog.py     ← resumen antes de confirmar; fechas de cheque editables + alerta naranja
@@ -301,6 +303,21 @@ Qué avisa hoy:
 | Faltan columnas requeridas | listado de faltantes | además aclara que los headers van en la **primera** fila y lista lo que leyó ahí |
 | Proveedor auto-eliminado por no tener saldo pendiente | mensaje de 7 s en la barra de estado | `QMessageBox` con la lista y la pista del formato de «Documento» |
 
+### Versionado y actualización desde la app (Fase 4)
+
+`src/version.py` tiene `VERSION` (se sube a mano) y `BUILD_SHA` / `BUILD_DATE`, que el CI reescribe con `sed` de Python antes de compilar. En el repo quedan **vacíos**: un build local es "dev", muestra `1.0.0 · dev` en el título y **no busca actualizaciones**. La versión se ve en el título de la ventana, en `Ayuda → Acerca de` y en el subtítulo de Configuración.
+
+`util/actualizacion.py`:
+
+- **Compara por commit, no por fecha.** El release usa el tag fijo `latest` y el CI publica el asset ~2 min después de compilar, así que `asset.updated_at > BUILD_DATE` siempre: comparar fechas avisaría de una versión nueva que es la que el usuario ya tiene. El body del release declara `Versión: X · commit: <sha>` y `hay_novedad()` compara el prefijo común de los dos shas (el body puede traer el corto y `version.py` el largo). Sin sha local o remoto → no avisa (fail-closed: mejor no avisar que avisar de más)
+- **Descarga verificada**: el asset del release trae `digest: sha256:…`; si el hash no coincide, borra el archivo y no reemplaza nada
+- **El swap lo hace un `.cmd`** en `%TEMP%`, porque el `.exe` en ejecución está bloqueado por su propio proceso. Espera a que el PID muera, guarda `GeneradorDePagos.anterior.exe`, mueve el nuevo sobre el actual y relanza. Dos detalles que costaron un bug real cada uno:
+  - las herramientas del sistema (`tasklist`, `findstr`, `ping`) se invocan con **ruta absoluta** vía `%SystemRoot%\System32`. Resolviéndolas por PATH, el `find` de Git Bash devolvía error, el loop concluía que la app había cerrado y **reemplazaba el binario en uso**
+  - el contador de intentos **no** va dentro de un bloque `( )`: batch expande `%VAR%` al parsear el bloque y quedaría siempre en 0
+  - a los ~2 min sin que la app cierre se rinde (`exit /b 2`), borra la descarga y no toca el `.exe`
+- Las rutas viajan como **argumentos** del `.cmd`, no incrustadas, así el script es ASCII puro y no depende de la codificación (rutas con acentos)
+- En la UI: chequeo silencioso 2,5 s después de arrancar (sólo si la app ya está configurada), `Ayuda → Buscar actualizaciones` para el manual, y la descarga usa la barra de progreso de la ventana principal en lugar de un diálogo modal
+
 ### Auto-limpieza tras envío exitoso
 
 Después de que `ResultDialog` se cierra, si `all(r["estado"] == "OK" for r in resultados)`:
@@ -385,7 +402,9 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 14. **El «Documento» se normaliza una sola vez, en `dm_reader`** — nunca comparar `item.documento` crudo contra Finnegans ni reimplementar `_es_fc` local: usar `domain/documento.py`
 15. **Si una fila del Excel se descarta, tiene que quedar registrado en `avisos_out`** — los silencios en la lectura son la clase de bug más caro de esta app: nadie se entera hasta que falta un pago
 16. **Ante una «Forma de pago» ambigua, MANUAL** — nunca adivinar entre cheque y transferencia (`cheque o transferencia` da `False` en las dos funciones). Al ampliar la tolerancia, agregar siempre los casos rechazados a los tests
-17. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
+17. **El `.cmd` de actualización invoca las herramientas del sistema con ruta absoluta y sin bloques `( )`** — por PATH agarra el `find` de otra herramienta y reemplaza el binario en uso; dentro de un bloque el contador de intentos nunca avanza
+18. **La detección de versión nueva compara commits, nunca fechas** — el CI publica el asset después de compilar, así que por fecha el release siempre parece más nuevo
+19. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
 
 ---
 
@@ -398,4 +417,5 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 | 2 | Silencios en la lectura del Excel: amarillo de tema ignorado, `Documento` con formato distinto que descarta al proveedor como "sin saldo", fechas inexistentes (`Ch 31/02`), mensaje de encabezados fila 1, aviso de columna "importe" duplicada | ✅ hecho |
 | 2b | Fechas inexistentes (`Ch 31/02`): generan su cheque marcado en vez de desaparecer; alerta naranja editable y **bloqueo del envío** mientras quede una alerta (regla movida a `domain/alertas_cheque.py`); check para confirmar plazos de más de 180 días | ✅ hecho |
 | 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` ya no caen en MANUAL; texto ambiguo sí | ✅ hecho |
-| 4 | Distribución: versión visible en el título, aviso de versión nueva, firma de código (compra) | ⏳ pendiente |
+| 4 | Distribución: versión visible, actualización desde la app (descarga verificada + swap del .exe), tests en el CI | ✅ hecho |
+| — | Firma de código (elimina SmartScreen y falsos positivos de antivirus) | ⏸ requiere comprar certificado |

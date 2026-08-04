@@ -68,7 +68,31 @@ Es normal y no significa que el archivo esté infectado.
 | El archivo no abre y no pasa nada | Clic derecho en el `.exe` → **Propiedades** → tildar **Desbloquear** → Aplicar |
 | El antivirus lo pone en cuarentena | Pedirle a Sistemas que agregue una excepción para esa carpeta (falso positivo típico de apps empaquetadas) |
 
-### 2.3 Primer arranque
+### 2.3 Actualizaciones (se hacen desde la app)
+
+Al abrir, la app verifica sola si hay una versión nueva. Si hay, muestra un cartel con la
+versión disponible y un botón **Sí** para actualizar en el momento:
+
+1. Descarga el archivo nuevo y **verifica que sea el del release** (comparación de huella
+   sha256). Si no coincide, no toca nada.
+2. Guarda tu versión actual como `GeneradorDePagos.anterior.exe`, por si hiciera falta volver.
+3. Cierra la app y la vuelve a abrir con la versión nueva.
+
+No hay que entrar al repositorio, ni bajar nada del navegador, ni aceptar SmartScreen otra vez
+(el archivo descargado por la app no queda marcado como "bajado de internet").
+
+También se puede buscar a mano en **Ayuda → Buscar actualizaciones**, y ahí mismo, en
+**Ayuda → Acerca de**, ver qué versión tenés. La versión aparece además en el título de la
+ventana y en la pantalla de Configuración — es el dato que hay que informar cuando algo falla.
+
+Si en el momento no te conviene actualizar, elegí **No**: la app sigue funcionando y vuelve a
+avisar en el próximo arranque.
+
+> **Excepción, una sola vez:** si tu `.exe` es anterior a la versión 1.0.0, no tiene el
+> mecanismo de actualización. Hay que bajarlo del link una última vez (sección 2.1); de ahí en
+> adelante se actualiza solo.
+
+### 2.4 Primer arranque
 
 - La primera vez tarda unos segundos más (descomprime en `%TEMP%`). Los siguientes arranques son más rápidos.
 - Al no haber configuración guardada, la app **abre sola la ventana de Configuración**.
@@ -585,6 +609,12 @@ Todo queda en el perfil del usuario de Windows, en `%APPDATA%\GeneradorDePagos\`
 | `key.bin` | Clave de cifrado de la configuración |
 | `audit_log.jsonl` | Registro de lo enviado y lo respondido por Finnegans (los tokens se enmascaran) |
 
+Y en la carpeta donde está el `.exe`, después de la primera actualización:
+
+| Archivo | Contenido |
+|---|---|
+| `GeneradorDePagos.anterior.exe` | La versión que había antes de actualizar. Se puede borrar; sirve para volver atrás si la nueva diera problemas |
+
 El `audit_log.jsonl` es lo primero que hay que mandar cuando se reporta un problema: tiene el
 detalle exacto de cada OP enviada y la respuesta del sistema.
 
@@ -617,6 +647,10 @@ tanda, o porque la base no supera el mínimo imponible.
 Porque sus documentos no figuran con saldo pendiente en Finnegans. La app te lo dice en un
 cartel al terminar de verificar saldos. Si estás seguro de que se debe, revisá que el número
 de la columna Documento sea el correcto (sección 4.5).
+
+**¿Cómo sé qué versión tengo?**
+Está en el título de la ventana, en **Ayuda → Acerca de** y en la pantalla de Configuración. Es
+el dato que hay que pasar cuando se reporta un problema.
 
 **¿Necesito instalar Python o Excel?**
 No. El `.exe` trae todo. Excel sólo hace falta para editar la planilla.
@@ -666,8 +700,15 @@ hizo cada cosa.
 
 ### A.4 Cómo se publica una versión nueva
 
-Ya está automatizado: cada `push` a `master` dispara GitHub Actions, que compila en Windows y
-reemplaza el `.exe` del release `latest`. El link de descarga nunca cambia.
+Ya está automatizado: cada `push` a `master` dispara GitHub Actions, que corre los tests,
+estampa en el binario la versión y el commit, compila en Windows y reemplaza el `.exe` del
+release `latest`. El link de descarga nunca cambia, y **los usuarios reciben el aviso dentro de
+la app** en el siguiente arranque.
+
+El número de versión se sube a mano en `src/version.py` (`VERSION = "1.0.0"`) cuando el cambio
+lo justifica; el commit y la fecha los pone el CI. La app compara **por commit**, no por fecha:
+el CI publica el binario un par de minutos después de compilarlo, así que comparar fechas haría
+que avise de una "versión nueva" que es la que el usuario ya tiene.
 
 Para compilar a mano (por ejemplo para probar antes de publicar):
 
@@ -683,9 +724,9 @@ PyInstaller puede informar éxito sin haber reemplazado el binario.
 
 | Tema | Situación |
 |---|---|
-| **No hay número de versión visible** | La app no muestra su versión en ninguna parte, así que no se puede saber qué build tiene cada usuario. Conviene agregarlo al título de la ventana |
-| **No hay auto-actualización** | El usuario tiene que volver a bajar el `.exe`. Con carpeta de red es un copiar/pegar |
-| **Sin firma digital** | Advertencia de SmartScreen en cada PC nueva y posibles falsos positivos de antivirus. Se resuelve comprando un certificado de firma de código |
+| **Sin firma digital** | Advertencia de SmartScreen la primera vez en cada PC nueva y posibles falsos positivos de antivirus. Se resuelve comprando un certificado de firma de código. Las **actualizaciones** posteriores no tienen este problema: las descarga la app, no el navegador |
+| **La actualización necesita permiso de escritura** | La app se reemplaza a sí misma en su carpeta. Si está en `Program Files` sin permisos, avisa y hay que reemplazarla a mano. Por eso conviene una carpeta propia del usuario, ej. `C:\GeneradorDePagos\` |
+| **Salto desde versiones anteriores a 1.0.0** | Los `.exe` viejos no tienen el mecanismo de actualización: hay que bajar el nuevo una última vez |
 | **Repositorio público** | El código y los endpoints son visibles (no hay credenciales en el repo). Si se prefiere, pasarlo a privado — pero entonces el link de descarga deja de funcionar sin cuenta |
 | **Numeración de cheques** | Coordinar chequeras entre usuarios (sección 10.2) |
 
@@ -698,6 +739,7 @@ PyInstaller puede informar éxito sin haber reemplazado el binario.
 - [ ] **Cargar chequeras** funcionando y chequera asignada a ese usuario
 - [ ] Acceso a la planilla DM
 - [ ] Este manual entregado, con foco en: filas amarillas, signos, `Ch dd/mm`, pantalla previa
+- [ ] Explicado que las actualizaciones salen del cartel al abrir la app, no del navegador
 - [ ] Primera tanda hecha **acompañada**, con una prueba de 1 solo proveedor
 
 ---

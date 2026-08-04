@@ -32,6 +32,8 @@ from src.ui import theme
 from src.ui.preview_dialog import PreviewDialog
 from src.ui.result_dialog import ResultDialog
 from src.ui.settings_dialog import SettingsDialog
+from src.util import actualizacion
+from src.version import etiqueta as version_etiqueta, etiqueta_larga as version_larga
 
 # Estado interno → (label, variante visual)
 def _hint(text: str) -> QLabel:
@@ -522,10 +524,38 @@ class _ProcesarWorker(QThread):
         self.terminado.emit(resultados)
 
 
+class _ActualizacionWorker(QThread):
+    """Consulta el release de GitHub sin bloquear la UI."""
+    listo = pyqtSignal(object, str)   # (Actualizacion | None, error)
+
+    def run(self) -> None:
+        try:
+            self.listo.emit(actualizacion.consultar(), "")
+        except Exception as exc:
+            self.listo.emit(None, str(exc))
+
+
+class _DescargaWorker(QThread):
+    """Descarga la actualización y lanza el reemplazo."""
+    progreso = pyqtSignal(int, int)   # (bajado, total)
+    listo    = pyqtSignal(str)        # "" si salió bien, o el error
+
+    def __init__(self, actu) -> None:
+        super().__init__()
+        self._actu = actu
+
+    def run(self) -> None:
+        try:
+            actualizacion.aplicar(self._actu, progreso=self.progreso.emit)
+            self.listo.emit("")
+        except Exception as exc:
+            self.listo.emit(str(exc))
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Generador de Pagos — Finnegans")
+        self.setWindowTitle(f"Generador de Pagos — Finnegans  ·  {version_etiqueta()}")
         self.resize(1080, 680)
         self.setMinimumSize(880, 560)
         self._cfg = config.load()
@@ -543,6 +573,9 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._abrir_settings)
         else:
             QTimer.singleShot(500, lambda: self._cargar_chequeras(silent=True))
+            # Sólo con la app ya configurada: durante el alta el usuario está en
+            # Configuración y acaba de bajar el .exe.
+            QTimer.singleShot(2500, lambda: self._buscar_actualizacion(silencioso=True))
 
     # ── construcción ──────────────────────────────────────────────────────
 
@@ -552,7 +585,109 @@ class MainWindow(QMainWindow):
         menu.addAction("Configuración", self._abrir_settings)
         menu.addSeparator()
         menu.addAction("Salir", self.close)
+
+        ayuda = mb.addMenu("Ayuda")
+        ayuda.addAction("Buscar actualizaciones",
+                        lambda: self._buscar_actualizacion(silencioso=False))
+        ayuda.addAction("Acerca de", self._mostrar_acerca_de)
         self.setMenuBar(mb)
+
+    # ── actualización ─────────────────────────────────────────────────────
+
+    def _mostrar_acerca_de(self) -> None:
+        QMessageBox.information(
+            self,
+            "Acerca de Generador de Pagos",
+            f"<b>Generador de Pagos</b><br>{version_larga()}<br><br>"
+            f"Genera Órdenes de Pago en Finnegans a partir de la planilla DM.",
+        )
+
+    def _buscar_actualizacion(self, silencioso: bool) -> None:
+        if not silencioso:
+            self.statusBar().showMessage("Buscando actualizaciones…")
+        self._actu_worker = _ActualizacionWorker()
+        self._actu_worker.listo.connect(
+            lambda actu, error: self._on_actualizacion(actu, error, silencioso)
+        )
+        self._actu_worker.start()
+
+    def _on_actualizacion(self, actu, error: str, silencioso: bool) -> None:
+        if error or actu is None:
+            # En el chequeo automático no molestamos: sin internet no es un
+            # problema del usuario.
+            if not silencioso:
+                QMessageBox.warning(
+                    self, "No se pudo verificar",
+                    f"No se pudo consultar si hay una versión nueva:\n{error or 'sin datos'}",
+                )
+            self.statusBar().clearMessage()
+            return
+
+        if not actualizacion.hay_novedad(actu.commit):
+            if not silencioso:
+                QMessageBox.information(
+                    self, "Sin novedades",
+                    f"Ya tenés la última versión.\n\n{version_larga()}",
+                )
+            self.statusBar().clearMessage()
+            return
+
+        mb = QMessageBox.question(
+            self,
+            "Hay una versión nueva",
+            f"Hay una versión nueva disponible ({actu.descripcion()}).<br><br>"
+            f"Tu versión: {version_larga()}<br><br>"
+            f"La app la descarga, verifica el archivo y se reinicia sola. "
+            f"Guarda una copia de la versión actual como "
+            f"<code>{actualizacion.NOMBRE_BACKUP}</code>.<br><br>"
+            f"¿Actualizar ahora?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if mb == QMessageBox.StandardButton.Yes:
+            self._descargar_actualizacion(actu)
+        else:
+            self.statusBar().showMessage(
+                "Actualización postergada. Está en Ayuda → Buscar actualizaciones.", 6000
+            )
+
+    def _descargar_actualizacion(self, actu) -> None:
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._progress.setVisible(True)
+        self._lbl_progreso.setText("Descargando actualización…")
+        self._lbl_progreso.setVisible(True)
+        self._btn_procesar.setEnabled(False)
+
+        self._descarga_worker = _DescargaWorker(actu)
+        self._descarga_worker.progreso.connect(self._on_descarga_progreso)
+        self._descarga_worker.listo.connect(self._on_descarga_lista)
+        self._descarga_worker.start()
+
+    def _on_descarga_progreso(self, bajado: int, total: int) -> None:
+        if total > 0:
+            self._progress.setValue(int(bajado * 100 / total))
+        self._lbl_progreso.setText(
+            f"Descargando actualización… {bajado // (1024 * 1024)} MB"
+            + (f" de {total // (1024 * 1024)} MB" if total else "")
+        )
+
+    def _on_descarga_lista(self, error: str) -> None:
+        self._progress.setVisible(False)
+        self._lbl_progreso.setVisible(False)
+        self._btn_procesar.setEnabled(True)
+        if error:
+            QMessageBox.critical(
+                self, "No se pudo actualizar",
+                f"{error}\n\nLa versión actual quedó intacta. Podés reintentar desde "
+                f"Ayuda → Buscar actualizaciones.",
+            )
+            return
+        QMessageBox.information(
+            self, "Actualización lista",
+            "La app se va a cerrar y abrir de nuevo con la versión nueva.",
+        )
+        self.close()
 
     def _build_ui(self) -> None:
         central = QWidget()
