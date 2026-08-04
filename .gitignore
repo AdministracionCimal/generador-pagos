@@ -24,3 +24,8 @@ graphify-out/
 # Logs de debug
 *.log
 
+# Script de diagnóstico: crea una OP REAL en Finnegans. Queda local a propósito
+# para que nadie lo corra por accidente (la verificación de credenciales ya está
+# en la app: Configuración → Probar conexión).
+debug_api.py
+
