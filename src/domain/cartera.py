@@ -1,12 +1,16 @@
 """Cheques de terceros en cartera, para endosar a un proveedor.
 
 Vienen del reporte `ApiSituacionCheques` de Finnegans (`TipoCheque=1`,
-`Estado="En Cartera"`). Dos cuidados que salieron de mirar los datos reales:
+`Estado="En Cartera"`).
 
-- **la respuesta mezcla empresas del grupo**: hay que consultarla filtrando por
-  empresa y, además, verificar que lo que volvió sea de una sola;
-- **hay cheques vencidos en cartera**, así que endosar uno sin mirar la fecha es
-  posible: `vencidos()` los detecta.
+Cuidado que salió de mirar los datos reales: **la respuesta mezcla empresas del
+grupo**, así que hay que consultarla filtrando por empresa y además verificar que
+lo que volvió sea de una sola.
+
+Un cheque endosado **puede tener vencimiento anterior a la fecha del pago** y eso
+es normal: a diferencia de un cheque propio, acá no se emite nada, se entrega un
+valor que ya existe. `vencidos()` es sólo informativo — **no** bloquea el envío ni
+genera alerta.
 """
 from __future__ import annotations
 
@@ -125,6 +129,8 @@ def validar_una_empresa(cheques: list[ChequeCartera]) -> None:
 
 
 def vencidos(cheques: list[ChequeCartera], hoy: date | None = None) -> list[ChequeCartera]:
+    """Cheques con vencimiento pasado. **Informativo**: endosar uno vencido es
+    válido, así que esto no bloquea ni alerta, sólo permite mostrarlo."""
     hoy = hoy or date.today()
     return [
         c for c in cheques

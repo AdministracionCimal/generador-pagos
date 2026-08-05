@@ -41,6 +41,9 @@ class Endpoints:
     def cuenta_list(self, token: str) -> str:
         return f"{self.base}/cuenta/list?ACCESS_TOKEN={token}"
 
+    def banco_list(self, token: str) -> str:
+        return f"{self.base}/banco/list?ACCESS_TOKEN={token}"
+
     def analisis_retencion(
         self,
         token: str,

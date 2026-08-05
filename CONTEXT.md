@@ -423,10 +423,12 @@ Objetivo: pagar un proveedor combinando medios en la misma celda de «Forma de p
 - el tramo de endoso va en `Banco` con `OperacionBancariaCodigo: "CHENDOSADOS"`, `CuentaCodigo: "01.01.01.03.0001"` (Valores a Depositar), `DebeHaber: -1`, el `DocumentoFisicoID` del cheque en cartera, su número, sus fechas, `ChequeraCodigo: null` y el `BancoCodigo` **del librador** (no el nuestro)
 - identidad que tiene que cerrar: `suma(Banco) == (facturas − créditos) − retenciones`. Los endosos van al nominal y los cheques propios se reparten el resto; el último absorbe los centavos
 - cartera: `ApiSituacionCheques` con `TipoCheque=1` y `Estado="En Cartera"` (por nombre). **Filtrar siempre por empresa**: la respuesta mezcla sociedades del grupo (20 de CIMALCO, 1 de PER SAS, 1 de RTC) y con el ID interno `EMPRESA_EMPRE01` devuelve **200 con cero filas**
+- el `BancoCodigo` del endoso es el del **librador** y sale de `/banco/list` cruzando por nombre: el reporte de cartera da el nombre, no el código. Los nombres coinciden entre los dos lados (con las empresas no pasaba) — verificado: 20/20 cheques resolvieron. Si alguna vez no se resuelve sin ambigüedad, ese pago va a carga manual antes que endosar con el banco equivocado
+- **un cheque endosado puede tener vencimiento anterior a la fecha del pago**: es normal, no se emite nada sino que se entrega un valor existente. `cartera.vencidos()` es informativo y no genera alerta. Consecuencia de diseño: los endosos **no** pueden modelarse como `ChequeEmitido`, porque `alertas_cheque.motivo_alerta()` bloquearía el envío por fecha pasada
 
-**Hecho:** `domain/forma_pago.py` (gramática + reparto), `domain/cartera.py` (lectura, búsqueda por número ignorando ceros, vencidos, guarda de multi-empresa), `domain/empresa.py` (saneo del prefijo, ahora compartido con `mapper`), `endpoints.situacion_cheques()` y `client.get_cheques_en_cartera()`.
+**Hecho:** `domain/forma_pago.py` (gramática + reparto), `domain/cartera.py` (lectura, búsqueda por número ignorando ceros, vencidos informativos, guarda de multi-empresa), `domain/bancos.py` (nombre → código), `domain/empresa.py` (saneo del prefijo, ahora compartido con `mapper`), `endpoints.situacion_cheques()` / `banco_list()` y sus métodos en el cliente.
 
-**Pendiente:** el `BancoCodigo` del cheque endosado (el reporte de cartera trae el nombre del banco, no el código) y la integración: `clasificador` (levantar la restricción de modalidad mixta y mandar a MANUAL los `RepartoError`), `fraccionador`, `mapper` (tramo de endoso), y la pantalla previa (desglose por tramo + alerta de cheque en cartera vencido).
+**Pendiente:** la integración — `clasificador` (levantar la restricción de modalidad mixta y mandar a MANUAL los `RepartoError`), `fraccionador`, `mapper` (tramo de endoso), modelo (una lista de endosos aparte de `cheques`) y la pantalla previa (desglose por tramo).
 
 ---
 

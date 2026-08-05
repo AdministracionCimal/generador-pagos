@@ -107,10 +107,13 @@ class TestFiltroPorEmpresa:
 
 
 class TestVencidos:
+    """Informativo únicamente: endosar un cheque con vencimiento anterior a la
+    fecha del pago es válido (no se emite nada, se entrega un valor existente),
+    así que esto NO bloquea ni alerta."""
+
     HOY = date(2026, 8, 4)
 
     def test_detecta_el_vencido(self):
-        """Hay cheques vencidos en cartera: endosarlos sin mirar es posible."""
         viejo = _fila(DOCUMENTOFISICOID=2, FECHAVENCIMIENTO="18-01-2025")
         cheques = leer_cartera([_fila(FECHAVENCIMIENTO="30-08-2026"), viejo])
         assert [c.documento_fisico_id for c in vencidos(cheques, self.HOY)] == [2]

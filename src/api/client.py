@@ -277,6 +277,17 @@ class FinnegansClient:
         data = self._parse_response(resp)
         return data if isinstance(data, list) else []
 
+    def get_banco_list(self) -> list[dict]:
+        """Bancos con su código. Necesario para el endoso: el reporte de cartera
+        trae el nombre del banco del librador y la OP pide el código."""
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(self.endpoints.banco_list(self._token), timeout=20)
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
     def get_tipo_operacion_bancaria_list(self) -> list[dict]:
         if self._token is None or time.time() >= self._token_expires_at:
             self._fetch_token()
