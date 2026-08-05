@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
-from .parser_pago import es_cheque, es_transferencia
+from .parser_pago import es_cheque, es_transferencia, parsear_slots_fecha
 
 CHEQUE        = "CHEQUE"
 TRANSFERENCIA = "TRANSFERENCIA"
@@ -118,6 +119,23 @@ def motivo_invalido(tramos: list[Tramo]) -> str | None:
             return f"porcentaje inválido: {tramo.porcentaje:g}%"
 
     return None
+
+
+def tramo_de(tramos: list[Tramo], tipo: str) -> Tramo | None:
+    return next((t for t in tramos if t.tipo == tipo), None)
+
+
+def cheques_previstos(tramos: list[Tramo], fecha_emision: date | None = None) -> int:
+    """Cuántos cheques propios va a emitir esta combinación.
+
+    Se usa antes de conocer importes (para la métrica de la tabla y el control de
+    límite de la chequera), así que sale de contar fechas, no de repartir.
+    """
+    tramo = tramo_de(tramos, CHEQUE)
+    if tramo is None:
+        return 0
+    slots = parsear_slots_fecha(tramo.fechas_texto, fecha_emision=fecha_emision)
+    return len(slots) or 1
 
 
 @dataclass

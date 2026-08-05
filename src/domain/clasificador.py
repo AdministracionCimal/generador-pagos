@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from .forma_pago import CHEQUE, TRANSFERENCIA, motivo_invalido, parsear_tramos
 from .models import Modalidad, ProveedorTanda
 from .parser_pago import (
     es_cheque,
@@ -52,16 +53,39 @@ def clasificar(proveedor: ProveedorTanda) -> ProveedorTanda:
                 f"— se van a emitir menos cheques de los previstos"
             )
 
-    todos_cheque = all(es_cheque(t) for t in textos_l)
-    todos_transf = all(es_transferencia(t) for t in textos_l)
+    # Cada texto se parsea en tramos: «Ch 10/09 + transferencia 30%» son dos.
+    tramos_por_texto = {t: parsear_tramos(t) for t in set(textos_l)}
 
-    if todos_cheque:
+    def _es_medio_simple(texto: str, tipo: str) -> bool:
+        """Un único tramo del tipo pedido y sin porcentaje: el camino de siempre."""
+        tramos = tramos_por_texto[texto]
+        return len(tramos) == 1 and tramos[0].tipo == tipo and tramos[0].porcentaje is None
+
+    if all(_es_medio_simple(t, CHEQUE) for t in textos_l):
         proveedor.modalidad = Modalidad.CHEQUE_PROPIO
-    elif todos_transf:
-        proveedor.modalidad = Modalidad.TRANSFERENCIA
-    else:
-        proveedor.modalidad = Modalidad.MANUAL
-        modalidades_distintas = sorted({t for t in textos_l if t})
-        proveedor.motivo_manual = f"Modalidad mixta o no soportada: {modalidades_distintas}"
+        return proveedor
 
+    if all(_es_medio_simple(t, TRANSFERENCIA) for t in textos_l):
+        proveedor.modalidad = Modalidad.TRANSFERENCIA
+        return proveedor
+
+    # Pago combinado: el reparto se hace sobre el total del proveedor, así que
+    # todos los ítems pagables tienen que indicar la misma combinación.
+    textos_unicos = {t for t in textos_l if t}
+    if len(textos_unicos) == 1:
+        texto = next(iter(textos_unicos))
+        tramos = tramos_por_texto[texto]
+        motivo = motivo_invalido(tramos)
+        if motivo is None:
+            proveedor.modalidad = Modalidad.COMBINADO
+            proveedor.tramos = tramos
+            return proveedor
+        proveedor.modalidad = Modalidad.MANUAL
+        proveedor.motivo_manual = f"«{texto}»: {motivo}"
+        return proveedor
+
+    proveedor.modalidad = Modalidad.MANUAL
+    proveedor.motivo_manual = (
+        f"Modalidad mixta o no soportada: {sorted(textos_unicos)}"
+    )
     return proveedor

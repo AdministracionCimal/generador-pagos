@@ -7,6 +7,7 @@ from enum import Enum, auto
 class Modalidad(Enum):
     CHEQUE_PROPIO = auto()
     TRANSFERENCIA = auto()
+    COMBINADO = auto()      # varios medios en la misma «Forma de pago»
     MANUAL = auto()
 
 
@@ -28,6 +29,9 @@ class ProveedorTanda:
     modalidad: Modalidad = Modalidad.MANUAL
     motivo_manual: str = ""
     avisos: list[str] = field(default_factory=list)   # advertencias no-fatales (ej. typos)
+    # Sólo en modalidad COMBINADO: los tramos de «Forma de pago» ya parseados
+    # (todos los ítems pagables comparten el mismo texto).
+    tramos: list = field(default_factory=list)
 
     @property
     def importe_total(self) -> Decimal:
@@ -50,9 +54,31 @@ class ChequeEmitido:
 
 
 @dataclass
+class ChequeEndosado:
+    """Cheque de tercero en cartera que se entrega al proveedor.
+
+    Va aparte de `ChequeEmitido` a propósito: acá no se emite nada, así que el
+    vencimiento puede ser anterior a la fecha del pago y **no** corresponde
+    aplicarle las alertas de fecha de los cheques propios.
+    """
+    documento_fisico_id: int
+    numero: str
+    importe: Decimal
+    fecha_emision: date | None
+    fecha_vencimiento: date | None
+    banco_codigo: str
+    librador: str = ""
+    banco_nombre: str = ""
+
+
+@dataclass
 class OpPago:
     proveedor: ProveedorTanda
     cheques: list[ChequeEmitido] = field(default_factory=list)
+    endosos: list[ChequeEndosado] = field(default_factory=list)
+    # Parte del pago que sale por transferencia. None = no hay tramo de
+    # transferencia (para la modalidad TRANSFERENCIA pura se calcula en el mapper).
+    importe_transferencia: Decimal | None = None
     numero_comprobante_estimado: str = ""
     chequera_codigo: str = ""
     banco_codigo: str = ""
@@ -60,6 +86,8 @@ class OpPago:
     cuenta_proveedor_codigo: str = "02.01.01.01.0001"
     op_bancaria_cheque_codigo: str = "EMCHPROP"
     op_bancaria_transferencia_codigo: str = "TLote"
+    op_bancaria_endoso_codigo: str = "CHENDOSADOS"
+    cuenta_valores_codigo: str = "01.01.01.03.0001"   # Valores a Depositar
     empresa_codigo: str = "EMPRE01"
     cotizacion_dolar: Decimal = field(default_factory=lambda: Decimal("1"))
     retenciones: list[dict] = field(default_factory=list)

@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from .models import ChequeEmitido, Modalidad, OpPago, ProveedorTanda
+from .models import ChequeEmitido, ChequeEndosado, Modalidad, OpPago, ProveedorTanda
 
 MONEDA_PES = "PES"
 
@@ -28,6 +28,50 @@ def _cheque_a_banco(ch: ChequeEmitido, op: OpPago) -> dict:
     }
 
 
+def _endoso_a_banco(endoso: ChequeEndosado, op: OpPago) -> dict:
+    """Cheque de tercero que se entrega al proveedor.
+
+    Finnegans lo identifica por `DocumentoFisicoID` (el de cartera) y el
+    `BancoCodigo` es el del **librador**, no el nuestro. No lleva chequera: el
+    cheque no sale de un talonario propio.
+    """
+    return {
+        "OperacionBancariaCodigo": op.op_bancaria_endoso_codigo,
+        "CuentaCodigo": op.cuenta_valores_codigo,
+        "DebeHaber": -1,
+        "ImporteMonTransaccion": float(endoso.importe),
+        "MonedaCodigo": MONEDA_PES,
+        "ImporteMonPrincipal": float(endoso.importe),
+        "Descripcion": None,
+        "DocumentoFisicoID": endoso.documento_fisico_id,
+        "FechaDocumentoFisico": _fmt_fecha(endoso.fecha_emision),
+        "FechaVencimientoDocumentoFisico": _fmt_fecha(endoso.fecha_vencimiento),
+        "ChequeraCodigo": None,
+        "BancoCodigo": endoso.banco_codigo,
+        "NumeroDocumentoFisico": endoso.numero,
+        "DimensionDistribucion": [],
+    }
+
+
+def _transferencia_a_banco(op: OpPago, importe: Decimal) -> dict:
+    return {
+        "OperacionBancariaCodigo": op.op_bancaria_transferencia_codigo,
+        "CuentaCodigo": op.cuenta_banco_codigo,
+        "DebeHaber": -1,
+        "ImporteMonTransaccion": float(importe),
+        "MonedaCodigo": MONEDA_PES,
+        "ImporteMonPrincipal": float(importe),
+        "Descripcion": None,
+        "DocumentoFisicoID": None,
+        "FechaDocumentoFisico": _fmt_fecha(op.fecha),
+        "FechaVencimientoDocumentoFisico": _fmt_fecha(op.fecha),
+        "ChequeraCodigo": None,
+        "BancoCodigo": op.banco_codigo,
+        "NumeroDocumentoFisico": None,
+        "DimensionDistribucion": [],
+    }
+
+
 def _item_a_ctacte(item, cuenta_proveedor: str) -> dict:
     # Créditos (PAGO -, NC, importe negativo): van como Haber → DebeHaber=-1, importe positivo.
     # Finnegans no acepta ImporteMonTransaccion negativo en CtaCte.
@@ -49,28 +93,19 @@ from .empresa import codigo_limpio as _empresa_codigo_limpio
 
 def armar_post(op: OpPago) -> dict:
     p = op.proveedor
-    banco = [_cheque_a_banco(ch, op) for ch in op.cheques]
+    # Orden: endosos primero, después los cheques propios y por último la
+    # transferencia — igual que en las OPs cargadas a mano en Finnegans.
+    banco = [_endoso_a_banco(e, op) for e in op.endosos]
+    banco += [_cheque_a_banco(ch, op) for ch in op.cheques]
 
-    if p.modalidad == Modalidad.TRANSFERENCIA and not op.cheques:
+    if op.importe_transferencia is not None:
+        # Pago combinado: el importe ya viene repartido (y con la retención
+        # descontada de este tramo si le correspondía).
+        banco.append(_transferencia_a_banco(op, op.importe_transferencia))
+    elif p.modalidad == Modalidad.TRANSFERENCIA and not op.cheques:
         # Banco = neto (lo que realmente sale del banco = total - retenciones)
         total_ret = sum((r.get("Importe") or Decimal("0")) for r in op.retenciones)
-        total_neto = p.importe_total - total_ret
-        banco = [{
-            "OperacionBancariaCodigo": op.op_bancaria_transferencia_codigo,
-            "CuentaCodigo": op.cuenta_banco_codigo,
-            "DebeHaber": -1,
-            "ImporteMonTransaccion": float(total_neto),
-            "MonedaCodigo": MONEDA_PES,
-            "ImporteMonPrincipal": float(total_neto),
-            "Descripcion": None,
-            "DocumentoFisicoID": None,
-            "FechaDocumentoFisico": _fmt_fecha(op.fecha),
-            "FechaVencimientoDocumentoFisico": _fmt_fecha(op.fecha),
-            "ChequeraCodigo": None,
-            "BancoCodigo": op.banco_codigo,
-            "NumeroDocumentoFisico": None,
-            "DimensionDistribucion": [],
-        }]
+        banco = [_transferencia_a_banco(op, p.importe_total - total_ret)]
 
     cta_cte = [_item_a_ctacte(i, op.cuenta_proveedor_codigo) for i in p.items]
 

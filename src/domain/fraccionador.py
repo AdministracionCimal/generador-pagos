@@ -1,10 +1,23 @@
 from dataclasses import replace as _dc_replace
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN
 
 from .documento import es_fc as _es_fc
 from .models import ChequeEmitido, ItemFactura
 from .parser_pago import parsear_slots_fecha
+
+_CENTAVOS = Decimal("0.01")
+
+
+def _parte(total: Decimal, n: int) -> Decimal:
+    """Importe de cada cheque al dividir `total` en `n`.
+
+    Se **trunca**, igual que Finnegans: verificado contra la OP OP-0004-00022502,
+    que reparte 11.089.819,72 en 8 cheques como 7 de 1.386.227,46 y el último de
+    1.386.227,50. Truncar además garantiza que el ajuste sea positivo — el último
+    cheque queda un poco más grande, nunca más chico.
+    """
+    return (total / n).quantize(_CENTAVOS, rounding=ROUND_DOWN)
 
 
 def _cheque_de_slot(
@@ -37,6 +50,46 @@ def _cheque_de_slot(
     )
 
 
+def fraccionar_importe(
+    importe: Decimal,
+    texto_fechas: str,
+    numero_desde: int,
+    fecha_emision: date,
+    anio: int | None = None,
+    fecha_fallback: date | None = None,
+) -> tuple[list[ChequeEmitido], int]:
+    """Divide un importe suelto entre las fechas de un texto tipo «Ch 10/09 - 20/09».
+
+    Lo usa el pago combinado: ahí la parte que va en cheques propios no es el
+    importe de un ítem sino lo que le tocó al tramo después del reparto.
+    """
+    slots = parsear_slots_fecha(texto_fechas, anio=anio, fecha_emision=fecha_emision)
+    if not slots:
+        cheque = ChequeEmitido(
+            numero=str(numero_desde),
+            importe=importe,
+            fecha_emision=fecha_emision,
+            fecha_vencimiento=fecha_fallback or fecha_emision,
+        )
+        return [cheque], numero_desde + 1
+
+    n = len(slots)
+    base   = _parte(importe, n)
+    ajuste = importe - base * n     # los centavos van al último
+    cheques = [
+        _cheque_de_slot(
+            numero_desde + i,
+            base + ajuste if i == n - 1 else base,
+            fecha_emision,
+            token,
+            fecha_vto,
+            fecha_fallback,
+        )
+        for i, (token, fecha_vto) in enumerate(slots)
+    ]
+    return cheques, numero_desde + n
+
+
 def fraccionar_item(
     item: ItemFactura,
     numero_desde: int,
@@ -64,7 +117,7 @@ def fraccionar_item(
         return [cheque], numero_desde + 1
 
     n = len(slots)
-    importe_base = (item.importe / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    importe_base = _parte(item.importe, n)
     suma_base    = importe_base * n
     diferencia   = item.importe - suma_base   # centavos de ajuste al último
 
@@ -121,7 +174,7 @@ def fraccionar_proveedor(
             slots  = slots_por_item[0]
             total  = sum(i.importe for i in items_fc) + credito_total
             n      = len(slots)
-            base   = (total / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            base   = _parte(total, n)
             ajuste = total - base * n
             for i, (token, fecha_vto) in enumerate(slots):
                 imp = base + ajuste if i == n - 1 else base
