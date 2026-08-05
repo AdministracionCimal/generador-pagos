@@ -2,7 +2,7 @@
 Golden-file test for mapper.armar_post().
 
 Reference: tests/fixtures/response_OP-0004-00021922.json
-Provider: C.O.F. S.A.S. (CUIT 30718308786)
+Provider: «PROVEEDOR 014 SA» (el fixture está anonimizado; el CUIT se setea acá)
 3 items: MOVFONDOS-10845, MOVFONDOS-10846, FC-21562 → 8 checks total
 
 Intentionally skipped / deferred to Sprint 7:
@@ -27,11 +27,11 @@ FIXTURE_XLS = Path(__file__).parent / "fixtures" / "07.05.2025.xlsx"
 FIXTURE_JSON = Path(__file__).parent / "fixtures" / "response_OP-0004-00021922.json"
 
 FECHA = date(2026, 5, 8)
-NUMERO_DESDE = 73189907
+NUMERO_DESDE = 70000001
 CHEQUERA = "MACRO CPDProv 03"
 BANCO = "00285"
 CUENTA_BANCO = "02.01.04.01.0009"
-CUIT = "30718308786"
+CUIT = "30111111117"
 CUENTA_PROVEEDOR = "02.01.01.01.0001"
 
 
@@ -43,7 +43,7 @@ def golden():
 @pytest.fixture(scope="module")
 def resultado(golden):
     proveedores = leer_dm(FIXTURE_XLS)
-    cof = next(p for p in proveedores if "C.O.F" in p.nombre)
+    cof = next(p for p in proveedores if p.nombre == "PROVEEDOR 014 SA")
     cof.cuit = CUIT
     cheques, _ = fraccionar_proveedor(cof.items, numero_desde=NUMERO_DESDE,
                                       fecha_emision=FECHA, anio=2026)

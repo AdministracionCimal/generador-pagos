@@ -18,24 +18,24 @@ class TestLeerDM:
 
     def test_cof_sas_presente(self):
         nombres = [p.nombre for p in self.proveedores]
-        assert any("C.O.F" in n for n in nombres)
+        assert "PROVEEDOR 014 SA" in nombres
 
     def test_cof_tiene_tres_items(self):
-        cof = next(p for p in self.proveedores if "C.O.F" in p.nombre)
+        cof = next(p for p in self.proveedores if p.nombre == "PROVEEDOR 014 SA")
         assert len(cof.items) == 3
 
     def test_cof_clasificado_cheque(self):
-        cof = next(p for p in self.proveedores if "C.O.F" in p.nombre)
+        cof = next(p for p in self.proveedores if p.nombre == "PROVEEDOR 014 SA")
         assert cof.modalidad == Modalidad.CHEQUE_PROPIO
 
     def test_cof_importe_total(self):
         from decimal import Decimal
-        cof = next(p for p in self.proveedores if "C.O.F" in p.nombre)
+        cof = next(p for p in self.proveedores if p.nombre == "PROVEEDOR 014 SA")
         # Suma de los 3 documentos: 917918.65 + 917918.65 + 12039500
         assert cof.importe_total == Decimal("13875337.30")
 
     def test_items_tienen_aplicacion_origen(self):
-        cof = next(p for p in self.proveedores if "C.O.F" in p.nombre)
+        cof = next(p for p in self.proveedores if p.nombre == "PROVEEDOR 014 SA")
         documentos = {i.documento for i in cof.items}
         assert "FC - 21562" in documentos or any("FC" in d for d in documentos)
 

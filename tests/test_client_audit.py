@@ -27,7 +27,7 @@ def test_crear_op_writes_audit_log(monkeypatch, tmp_path):
 
     monkeypatch.setattr("src.api.client.httpx.post", fake_post)
 
-    payload = {"Proveedor": "30718308786", "Banco": []}
+    payload = {"Proveedor": "30111111117", "Banco": []}
     result = client.crear_op(payload)
 
     assert result["NumeroComprobante"] == "OP-0001"

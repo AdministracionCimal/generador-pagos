@@ -16,7 +16,7 @@ def _proveedor(*col_l_values: str) -> ProveedorTanda:
         )
         for i, col_l in enumerate(col_l_values)
     ]
-    return ProveedorTanda(cuit="30718308786", nombre="TEST", items=items)
+    return ProveedorTanda(cuit="30111111117", nombre="TEST", items=items)
 
 
 class TestClasificar:

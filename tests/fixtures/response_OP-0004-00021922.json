@@ -2,7 +2,7 @@
   "IdentificacionExterna": "PAGO - 13992",
   "EmpresaCodigo": "EMPRE01",
   "NumeroComprobante": "OP-0004-00021922",
-  "Proveedor": "30718308786",
+  "Proveedor": "30111111117",
   "TransaccionTipoCodigo": "OPERTESORERIA",
   "TransaccionSubtipoCodigo": "PAGO",
   "Fecha": "2026-05-08",
@@ -25,7 +25,7 @@
       "FechaVencimientoDocumentoFisico": "2026-05-15",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189907",
+      "NumeroDocumentoFisico": "70000001",
       "DimensionDistribucion": []
     },
     {
@@ -41,7 +41,7 @@
       "FechaVencimientoDocumentoFisico": "2026-05-16",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189908",
+      "NumeroDocumentoFisico": "70000002",
       "DimensionDistribucion": []
     },
     {
@@ -57,7 +57,7 @@
       "FechaVencimientoDocumentoFisico": "2026-06-08",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189909",
+      "NumeroDocumentoFisico": "70000003",
       "DimensionDistribucion": []
     },
     {
@@ -73,7 +73,7 @@
       "FechaVencimientoDocumentoFisico": "2026-06-09",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189910",
+      "NumeroDocumentoFisico": "70000004",
       "DimensionDistribucion": []
     },
     {
@@ -89,7 +89,7 @@
       "FechaVencimientoDocumentoFisico": "2026-06-18",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189911",
+      "NumeroDocumentoFisico": "70000005",
       "DimensionDistribucion": []
     },
     {
@@ -105,7 +105,7 @@
       "FechaVencimientoDocumentoFisico": "2026-06-19",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189912",
+      "NumeroDocumentoFisico": "70000006",
       "DimensionDistribucion": []
     },
     {
@@ -121,7 +121,7 @@
       "FechaVencimientoDocumentoFisico": "2026-07-05",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189913",
+      "NumeroDocumentoFisico": "70000007",
       "DimensionDistribucion": []
     },
     {
@@ -137,7 +137,7 @@
       "FechaVencimientoDocumentoFisico": "2026-07-06",
       "ChequeraCodigo": "MACRO CPDProv 03",
       "BancoCodigo": "00285",
-      "NumeroDocumentoFisico": "73189914",
+      "NumeroDocumentoFisico": "70000008",
       "DimensionDistribucion": []
     }
   ],
@@ -170,7 +170,7 @@
       "ImporteMonTransaccion": 917918.65,
       "MonedaCodigo": "PES",
       "ImporteMonPrincipal": 917918.65,
-      "Descripcion": "F-0000-00010823",
+      "Descripcion": "F-0001-00000040",
       "AplicacionOrigen": "MOVFONDOS - 10845",
       "DimensionDistribucion": []
     },
@@ -180,7 +180,7 @@
       "ImporteMonTransaccion": 917918.65,
       "MonedaCodigo": "PES",
       "ImporteMonPrincipal": 917918.65,
-      "Descripcion": "F-0000-00010824",
+      "Descripcion": "F-0001-00000041",
       "AplicacionOrigen": "MOVFONDOS - 10846",
       "DimensionDistribucion": []
     },
@@ -190,7 +190,7 @@
       "ImporteMonTransaccion": 12039500,
       "MonedaCodigo": "PES",
       "ImporteMonPrincipal": 12039500,
-      "Descripcion": "A-0001-00000123",
+      "Descripcion": "A-0001-00000042",
       "AplicacionOrigen": "FC - 21562",
       "DimensionDistribucion": []
     }
