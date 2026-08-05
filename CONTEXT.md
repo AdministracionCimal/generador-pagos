@@ -401,14 +401,15 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 13. **Los cortes de red no son errores de API** — `NetworkError` requiere verificación manual (`SIN CONFIRMACION`), no reintento automático
 14. **El «Documento» se normaliza una sola vez, en `dm_reader`** — nunca comparar `item.documento` crudo contra Finnegans ni reimplementar `_es_fc` local: usar `domain/documento.py`
 15. **Si una fila del Excel se descarta, tiene que quedar registrado en `avisos_out`** — los silencios en la lectura son la clase de bug más caro de esta app: nadie se entera hasta que falta un pago
-16. **Ante una «Forma de pago» ambigua, MANUAL** — nunca adivinar entre cheque y transferencia (`cheque o transferencia` da `False` en las dos funciones). Al ampliar la tolerancia, agregar siempre los casos rechazados a los tests
-17. **El `.cmd` de actualización invoca las herramientas del sistema con ruta absoluta y sin bloques `( )`** — por PATH agarra el `find` de otra herramienta y reemplaza el binario en uso; dentro de un bloque el contador de intentos nunca avanza
-18. **La detección de versión nueva compara commits, nunca fechas** — el CI publica el asset después de compilar, así que por fecha el release siempre parece más nuevo
-19. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
+16. **El endoso va por el nominal del cheque y nunca absorbe retenciones** — la retención sale de la transferencia y, si no hay, del cheque propio
+17. **Ante una «Forma de pago» ambigua, MANUAL** — nunca adivinar entre cheque y transferencia (`cheque o transferencia` da `False` en las dos funciones). Al ampliar la tolerancia, agregar siempre los casos rechazados a los tests
+18. **El `.cmd` de actualización invoca las herramientas del sistema con ruta absoluta y sin bloques `( )`** — por PATH agarra el `find` de otra herramienta y reemplaza el binario en uso; dentro de un bloque el contador de intentos nunca avanza
+19. **La detección de versión nueva compara commits, nunca fechas** — el CI publica el asset después de compilar, así que por fecha el release siempre parece más nuevo
+20. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
 
 ---
 
-## En curso: pagos combinados y endosos (2026-08-04)
+## Pagos combinados y endosos (2026-08-04) — implementado
 
 Objetivo: pagar un proveedor combinando medios en la misma celda de «Forma de pago» — cheque propio, transferencia y **endoso de cheques de terceros en cartera**.
 
@@ -426,9 +427,20 @@ Objetivo: pagar un proveedor combinando medios en la misma celda de «Forma de p
 - el `BancoCodigo` del endoso es el del **librador** y sale de `/banco/list` cruzando por nombre: el reporte de cartera da el nombre, no el código. Los nombres coinciden entre los dos lados (con las empresas no pasaba) — verificado: 20/20 cheques resolvieron. Si alguna vez no se resuelve sin ambigüedad, ese pago va a carga manual antes que endosar con el banco equivocado
 - **un cheque endosado puede tener vencimiento anterior a la fecha del pago**: es normal, no se emite nada sino que se entrega un valor existente. `cartera.vencidos()` es informativo y no genera alerta. Consecuencia de diseño: los endosos **no** pueden modelarse como `ChequeEmitido`, porque `alertas_cheque.motivo_alerta()` bloquearía el envío por fecha pasada
 
-**Hecho:** `domain/forma_pago.py` (gramática + reparto), `domain/cartera.py` (lectura, búsqueda por número ignorando ceros, vencidos informativos, guarda de multi-empresa), `domain/bancos.py` (nombre → código), `domain/empresa.py` (saneo del prefijo, ahora compartido con `mapper`), `endpoints.situacion_cheques()` / `banco_list()` y sus métodos en el cliente.
+**Módulos:** `domain/forma_pago.py` (gramática, validación y reparto), `domain/pago_combinado.py` (orquesta reparto + cartera + resolución de banco), `domain/cartera.py`, `domain/bancos.py`, `domain/empresa.py`, `endpoints.situacion_cheques()` / `banco_list()` y sus métodos en el cliente.
 
-**Pendiente:** la integración — `clasificador` (levantar la restricción de modalidad mixta y mandar a MANUAL los `RepartoError`), `fraccionador`, `mapper` (tramo de endoso), modelo (una lista de endosos aparte de `cheques`) y la pantalla previa (desglose por tramo).
+**Cómo fluye:**
+
+1. `clasificar()` parsea cada «Forma de pago» con `parsear_tramos()`. Un único tramo sin `%` sigue dando `CHEQUE_PROPIO` o `TRANSFERENCIA` (camino de siempre); cualquier otra cosa válida da `COMBINADO` y guarda los tramos en `ProveedorTanda.tramos`, exigiendo que **todos los ítems pagables indiquen la misma combinación** (el reparto es sobre el total del proveedor)
+2. `_PrecargarWorker` trae cartera y `/banco/list` **sólo si algún proveedor tiene un tramo de endoso**
+3. `_construir_ops` llama a `pago_combinado.armar()`. Un `RepartoError` (endoso que no cierra, cheque que no está en cartera, banco irresoluble) pasa el proveedor a `MANUAL` con el motivo y lo suma a las advertencias
+4. `mapper` emite los tramos en el orden endosos → cheques propios → transferencia, igual que las OPs cargadas a mano
+
+**Ojo con las cuentas contables:** en un pago combinado los cheques propios salen de `02.01.04.01.0009`, la transferencia de `01.01.01.02.0006` y el endoso de `01.01.01.03.0001`. Por eso `OpPago` tiene `cuenta_banco_transferencia_codigo` además de `cuenta_banco_codigo` (si está vacía se usa la otra, que es lo que hace la modalidad TRANSFERENCIA pura).
+
+**Fraccionamiento:** `_parte()` en `fraccionador` **trunca** y le deja el resto al último cheque, como Finnegans. Antes redondeaba hacia arriba: mismo total, distribución distinta.
+
+**Bug latente que apareció:** con la gramática nueva, `Ch 10/09 + transferencia 30%` clasificaba como `CHEQUE_PROPIO` (el texto tiene «Ch» + número) y **la transferencia se perdía en silencio**. Por eso el clasificador ahora pasa siempre por el parser de tramos.
 
 ---
 

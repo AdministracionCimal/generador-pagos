@@ -40,6 +40,23 @@ def _fmt(importe: float) -> str:
     return f"$ {importe:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _etiqueta_modalidad(op: OpPago) -> tuple[str, str]:
+    """Cómo se paga esta OP: en un combinado se nombran los medios que tiene."""
+    if op.proveedor.modalidad != Modalidad.COMBINADO:
+        if op.proveedor.modalidad == Modalidad.TRANSFERENCIA:
+            return "Transferencia", "info"
+        return "Cheque propio", "success"
+
+    medios = []
+    if op.endosos:
+        medios.append("endoso" if len(op.endosos) == 1 else f"{len(op.endosos)} endosos")
+    if op.cheques:
+        medios.append("cheque propio")
+    if op.importe_transferencia is not None:
+        medios.append("transferencia")
+    return " + ".join(medios).capitalize() or "Combinado", "info"
+
+
 def _retencion_label(ret: dict) -> str:
     nombre = str(ret.get("_nombre", "") or "").strip()
     nombre_tipo = str(ret.get("_nombre_tipo", "") or "").strip()
@@ -220,8 +237,7 @@ class PreviewDialog(QDialog):
 
         meta = QHBoxLayout()
         meta.setSpacing(8)
-        modalidad = "Cheque propio" if p.modalidad == Modalidad.CHEQUE_PROPIO else "Transferencia"
-        modalidad_variant = "info" if p.modalidad == Modalidad.TRANSFERENCIA else "success"
+        modalidad, modalidad_variant = _etiqueta_modalidad(op)
         meta.addWidget(theme.make_badge(modalidad, modalidad_variant))
 
         cuit = QLabel(f"CUIT {p.cuit or '—'}")
@@ -348,14 +364,54 @@ class PreviewDialog(QDialog):
         layout.addWidget(content)
         return wrapper
 
-    def _build_payment_table(self, op: OpPago) -> QTableWidget:
-        if op.cheques:
-            return self._build_cheques_table(op)
+    def _build_payment_table(self, op: OpPago) -> QWidget:
+        """Una tabla por medio de pago: endosos, cheques propios y transferencia."""
+        tablas: list[QWidget] = []
 
+        if op.endosos:
+            tablas.append(self._build_endosos_table(op))
+        if op.cheques:
+            tablas.append(self._build_cheques_table(op))
+        if op.importe_transferencia is not None:
+            tablas.append(self._build_table(
+                ["Operacion", "Importe"],
+                [["Transferencia", _fmt(float(op.importe_transferencia))]],
+                right_align_cols={1},
+            ))
+
+        if not tablas:
+            tablas.append(self._build_table(
+                ["Operacion", "Importe"],
+                [["Transferencia por lote", _fmt(self._payment_total(op))]],
+                right_align_cols={1},
+            ))
+
+        if len(tablas) == 1:
+            return tablas[0]
+
+        contenedor = QWidget()
+        col = QVBoxLayout(contenedor)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+        for tabla in tablas:
+            col.addWidget(tabla)
+        return contenedor
+
+    def _build_endosos_table(self, op: OpPago) -> QTableWidget:
+        """Cheques de terceros que se entregan. Sin fecha editable: el vencimiento
+        es el del cheque y puede ser anterior al pago sin que eso sea un problema."""
         return self._build_table(
-            ["Operacion", "Importe"],
-            [["Transferencia por lote", _fmt(self._payment_total(op))]],
-            right_align_cols={1},
+            ["Endoso Nº", "Banco", "Vencimiento", "Importe"],
+            [
+                [
+                    e.numero,
+                    e.banco_nombre or e.banco_codigo,
+                    e.fecha_vencimiento.strftime("%d/%m/%Y") if e.fecha_vencimiento else "—",
+                    _fmt(float(e.importe)),
+                ]
+                for e in op.endosos
+            ],
+            right_align_cols={3},
         )
 
     def _build_cheques_table(self, op: OpPago) -> QTableWidget:

@@ -27,6 +27,10 @@ _DEFAULTS: dict = {
     "op_bancaria_cheque_nombre": "Emisión de cheque propio",
     "op_bancaria_transferencia_codigo": "TLote",
     "op_bancaria_transferencia_nombre": "Transferencia por Lote",
+    "op_bancaria_endoso_codigo": "CHENDOSADOS",
+    "op_bancaria_endoso_nombre": "Endoso de cheque a tercero",
+    "cuenta_valores_codigo": "01.01.01.03.0001",
+    "cuenta_valores_nombre": "Valores a Depositar",
     "cotizacion_dolar": "",
 }
 

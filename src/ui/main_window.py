@@ -21,8 +21,13 @@ from PyQt6.QtWidgets import (
 import src.config as config
 from src.api.client import ApiError, AuthError, FinnegansClient, NetworkError
 from src.domain.alertas_cheque import cheques_en_alerta
+from src.domain.bancos import mapa_por_nombre
+from src.domain.cartera import leer_cartera, validar_una_empresa
 from src.domain.clasificador import clasificar
 from src.domain.documento import es_fc, es_pago, normalizar as normalizar_doc
+from src.domain.empresa import codigo_limpio as empresa_codigo_limpio
+from src.domain.forma_pago import ENDOSO, RepartoError, cheques_previstos
+from src.domain.pago_combinado import armar as armar_pago_combinado
 from src.domain.fraccionador import fraccionar_proveedor
 from src.domain.mapper import armar_post
 from src.domain.models import Modalidad, OpPago, ProveedorTanda
@@ -169,7 +174,7 @@ class _CheckHeader(QHeaderView):
 
 class _PrecargarWorker(QThread):
     progreso = pyqtSignal(str)
-    listo    = pyqtSignal(object, object, object, object, object, object, object)  # cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback, ultimo_op, ultimo_cheque_erp
+    listo    = pyqtSignal(object, object, object, object, object, object, object, object, object)  # cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes, cotizacion_fallback, ultimo_op, ultimo_cheque_erp, cheques_cartera, mapa_bancos
     error    = pyqtSignal(str)
 
     def __init__(self, proveedores: list, cfg: dict, cache_docs: dict | None = None) -> None:
@@ -211,6 +216,34 @@ class _PrecargarWorker(QThread):
                 ultimo_cheque_erp = str(detalle_cheq.get("NumeroActual", "") or "").strip()
             except Exception:
                 ultimo_cheque_erp = ""
+
+        # Cheques en cartera y códigos de banco: sólo si algún proveedor endosa.
+        cheques_cartera: list = []
+        mapa_bancos: dict = {}
+        if any(
+            t.tipo == ENDOSO
+            for p in self._proveedores
+            for t in getattr(p, "tramos", [])
+        ):
+            empresa_limpia = empresa_codigo_limpio(cfg.get("empresa_codigo", ""))
+            try:
+                filas = client.get_cheques_en_cartera(
+                    empresa_limpia, date.today().strftime("%Y-%m-%d")
+                )
+                cheques_cartera = leer_cartera(filas)
+                validar_una_empresa(cheques_cartera)
+                self.progreso.emit(
+                    f"{len(cheques_cartera)} cheques en cartera de {empresa_limpia}"
+                )
+            except Exception as exc:
+                _LOG.warning("cartera falló: %s", exc)
+                self.progreso.emit(f"⚠ no se pudo leer la cartera de cheques ({exc})")
+                cheques_cartera = []
+            try:
+                mapa_bancos = mapa_por_nombre(client.get_banco_list())
+            except Exception as exc:
+                _LOG.warning("banco/list falló: %s", exc)
+                self.progreso.emit(f"⚠ no se pudo leer el listado de bancos ({exc})")
 
         cache: dict = {}
         codigos_ret_cargados: dict = {}
@@ -370,6 +403,8 @@ class _PrecargarWorker(QThread):
             cotizacion_fallback,
             ultimo_op,
             ultimo_cheque_erp,
+            cheques_cartera,
+            mapa_bancos,
         )
 
 
@@ -1089,6 +1124,11 @@ class MainWindow(QMainWindow):
                                                fecha_emision=date.today())
                 n_cheques = len(chs)
                 cheques_usados += n_cheques
+            elif p.modalidad == Modalidad.COMBINADO and ultimo is not None:
+                # Sin importes todavía (faltan retenciones y cartera): la cantidad
+                # sale de contar las fechas del tramo de cheque.
+                n_cheques = cheques_previstos(p.tramos, fecha_emision=date.today())
+                cheques_usados += n_cheques
 
             estado = self._calcular_estado(p, n_cheques, ultimo, limite, cheques_usados - n_cheques)
             filas.append((p, n_cheques, estado))
@@ -1178,7 +1218,9 @@ class MainWindow(QMainWindow):
             return "SIN_ITEMS"
         if p.modalidad == Modalidad.MANUAL:
             return "MANUAL"
-        if p.modalidad == Modalidad.CHEQUE_PROPIO:
+        if p.modalidad == Modalidad.CHEQUE_PROPIO or (
+            p.modalidad == Modalidad.COMBINADO and n_cheques
+        ):
             if ultimo is None or limite is None:
                 return "EXCEDE"
             if (ultimo + cheques_ya_usados + n_cheques) > limite:
@@ -1280,6 +1322,8 @@ class MainWindow(QMainWindow):
         cotizacion_fallback,
         ultimo_op,
         ultimo_cheque_erp="",
+        cheques_cartera=None,
+        mapa_bancos=None,
     ) -> None:
         self._progress.setRange(0, 100)
         self._progress.setVisible(False)
@@ -1308,7 +1352,11 @@ class MainWindow(QMainWindow):
             self._btn_procesar.setEnabled(True)
             return
 
-        self._construir_ops(self._ultimo_cheque, cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes)
+        self._construir_ops(
+            self._ultimo_cheque, cotizacion_dolar, ret_cache, ratios_fc, docs_pendientes,
+            cheques_cartera=cheques_cartera or [],
+            mapa_bancos=mapa_bancos or {},
+        )
         self._actualizar_estados_post_precarga(docs_pendientes)
 
         # Si hubo overflow, ofrecer chequera alternativa antes de continuar
@@ -1479,7 +1527,9 @@ class MainWindow(QMainWindow):
     def _construir_ops(self, ultimo: int, cotizacion_dolar: "Decimal | None" = None,
                        ret_cache: dict | None = None,
                        ratios_fc: dict | None = None,
-                       docs_pendientes: dict | None = None) -> None:
+                       docs_pendientes: dict | None = None,
+                       cheques_cartera: list | None = None,
+                       mapa_bancos: dict | None = None) -> None:
         from dataclasses import replace as _dc_replace
         from decimal import Decimal as _D
         from src.domain.retenciones import calcular_retenciones
@@ -1487,6 +1537,8 @@ class MainWindow(QMainWindow):
         ret_cache = ret_cache or {}
         ratios_fc = ratios_fc or {}
         docs_pendientes = docs_pendientes or {}
+        cheques_cartera = cheques_cartera or []
+        mapa_bancos = mapa_bancos or {}
         self._ops_a_procesar = []
         self._ops_advertencias: list[str] = []
         self._proveedores_overflow: list = []   # proveedores que exceden el límite
@@ -1552,6 +1604,9 @@ class MainWindow(QMainWindow):
 
             limite = self._limite()
             cheques = []
+            endosos = []
+            importe_transferencia = None
+
             if p.modalidad == Modalidad.CHEQUE_PROPIO:
                 cheques, numero_desde = fraccionar_proveedor(
                     items_a_usar, numero_desde=numero_desde, fecha_emision=date.today()
@@ -1560,6 +1615,34 @@ class MainWindow(QMainWindow):
                     self._proveedores_overflow.append(p)
                     numero_desde -= len(cheques)  # liberar los números reservados
                     continue
+
+            elif p.modalidad == Modalidad.COMBINADO:
+                # El reparto necesita el total de retenciones, no los ítems ya
+                # ajustados: la retención se descuenta de un tramo, no de las FCs.
+                total_ret = sum(
+                    (r.get("Importe") or _D("0")) for r in retenciones_post
+                )
+                try:
+                    pago = armar_pago_combinado(
+                        p, p.tramos, total_ret, cheques_cartera, mapa_bancos,
+                        numero_desde=numero_desde, fecha_emision=date.today(),
+                    )
+                except RepartoError as exc:
+                    # No se puede armar solo: queda para cargar a mano.
+                    p.modalidad = Modalidad.MANUAL
+                    p.motivo_manual = str(exc)
+                    self._ops_advertencias.append(f"• {p.nombre}: {exc}")
+                    continue
+                cheques = pago.cheques
+                endosos = pago.endosos
+                importe_transferencia = pago.importe_transferencia
+                if cheques:
+                    numero_desde = pago.proximo_numero_cheque
+                    if limite and (numero_desde - 1) > limite:
+                        self._proveedores_overflow.append(p)
+                        numero_desde -= len(cheques)
+                        continue
+
             cuenta_banco = (
                 cuenta_banco_transf if p.modalidad == Modalidad.TRANSFERENCIA
                 else cuenta_banco_cheque
@@ -1567,11 +1650,20 @@ class MainWindow(QMainWindow):
             op = OpPago(
                 proveedor=p,
                 cheques=cheques,
+                endosos=endosos,
+                importe_transferencia=importe_transferencia,
                 chequera_codigo=chequera,
                 banco_codigo=banco_codigo,
                 cuenta_banco_codigo=cuenta_banco,
+                cuenta_banco_transferencia_codigo=cuenta_banco_transf,
                 op_bancaria_cheque_codigo=op_cheque,
                 op_bancaria_transferencia_codigo=op_transf,
+                op_bancaria_endoso_codigo=self._cfg.get(
+                    "op_bancaria_endoso_codigo", "CHENDOSADOS"
+                ),
+                cuenta_valores_codigo=self._cfg.get(
+                    "cuenta_valores_codigo", "01.01.01.03.0001"
+                ),
                 empresa_codigo=self._cfg.get("empresa_codigo", "EMPRE01"),
                 cotizacion_dolar=cotizacion_dolar,
                 retenciones=retenciones_post,

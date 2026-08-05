@@ -56,7 +56,7 @@ def _endoso_a_banco(endoso: ChequeEndosado, op: OpPago) -> dict:
 def _transferencia_a_banco(op: OpPago, importe: Decimal) -> dict:
     return {
         "OperacionBancariaCodigo": op.op_bancaria_transferencia_codigo,
-        "CuentaCodigo": op.cuenta_banco_codigo,
+        "CuentaCodigo": op.cuenta_banco_transferencia_codigo or op.cuenta_banco_codigo,
         "DebeHaber": -1,
         "ImporteMonTransaccion": float(importe),
         "MonedaCodigo": MONEDA_PES,

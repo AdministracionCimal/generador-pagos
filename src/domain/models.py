@@ -83,6 +83,10 @@ class OpPago:
     chequera_codigo: str = ""
     banco_codigo: str = ""
     cuenta_banco_codigo: str = ""
+    # Sólo en pagos combinados: los cheques propios y la transferencia salen de
+    # cuentas distintas. Si queda vacía se usa `cuenta_banco_codigo` (que es lo
+    # que hace la modalidad TRANSFERENCIA pura).
+    cuenta_banco_transferencia_codigo: str = ""
     cuenta_proveedor_codigo: str = "02.01.01.01.0001"
     op_bancaria_cheque_codigo: str = "EMCHPROP"
     op_bancaria_transferencia_codigo: str = "TLote"

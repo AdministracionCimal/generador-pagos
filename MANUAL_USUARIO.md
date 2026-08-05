@@ -258,6 +258,42 @@ un MOVFONDOS también puede pagarse en 3 cheques.
 | `transferencia bancaria`, `Transferencia inmediata`, `transf bancaria` | Igual que transferencia |
 | `tranferencia`, `transferensia`, `trnasferencia` | Se acepta como transferencia y **avisa del error de tipeo** |
 
+**Pagos combinados** (varios medios para un mismo proveedor): se escriben en la misma celda,
+separados por `+`. Se puede indicar qué porcentaje va por cada medio.
+
+| Lo que se escribe | Qué hace |
+|---|---|
+| `Ch 10/09 + transferencia 30%` | 30% por transferencia y el resto en un cheque al 10/09 |
+| `Ch 10/09 - 20/09 70% + transferencia 30%` | 30% por transferencia y el 70% repartido en 2 cheques |
+| `Endoso 11139918 + Ch 10/09` | Se entrega ese cheque de cartera y el resto va en un cheque propio |
+| `Endoso 11139918 - 03744630 + transferencia` | Dos cheques endosados y el resto por transferencia |
+| `Endoso 11139918` | Sólo el endoso: **el cheque tiene que cubrir exactamente el total** |
+
+Cómo se reparte: primero los **endosos**, que van por el importe exacto del cheque (no se puede
+fraccionar ni modificar); después los tramos con **porcentaje**; y el tramo **sin** porcentaje se
+queda con el resto. **Las retenciones se descuentan de la transferencia** (o del cheque propio si
+no hay transferencia), nunca del endoso.
+
+Ejemplo con números: una factura de $1.000.000 con $50.000 de retención y
+`Ch 10/09 + transferencia 30%` → transferencia de **$250.000** (el 30% menos la retención) y un
+cheque al 10/09 por **$700.000**.
+
+**Los números de cheque a endosar** se pueden escribir con o sin los ceros de la izquierda
+(`00017` o `17`), y sirve tanto el número del cheque como el número electrónico. La app verifica
+contra la cartera de Finnegans que el cheque exista, que sea de la empresa que paga y que esté
+en cartera. Un cheque endosado **puede tener vencimiento anterior a la fecha del pago**: eso es
+normal y no genera alerta.
+
+**Reglas de los pagos combinados:**
+
+- Todos los ítems del mismo proveedor tienen que indicar **la misma** combinación (el reparto se
+  hace sobre el total del proveedor).
+- Si hay dos tramos sin porcentaje, no se sabe cómo repartir → Carga manual.
+- Si todos los tramos llevan porcentaje, tienen que sumar 100%.
+- Si un endoso **no cierra exacto** —queda saldo a favor o en contra— el proveedor va a **Carga
+  manual** indicando la diferencia. Esos casos se cargan a mano en Finnegans, porque al cambiar
+  el importe de la cuenta corriente el sistema recalcula las retenciones.
+
 **Lo que queda en Carga manual (a propósito):**
 
 | Texto | Por qué |
@@ -403,8 +439,12 @@ Acá pueden aparecer, en este orden:
 
 ### Paso 5 — Verificación previa (la pantalla más importante)
 
-Muestra, por proveedor: los ítems que se cancelan, los cheques o la transferencia, las
-retenciones calculadas, y arriba los totales **ÓRDENES / BRUTO / RETENCIONES / NETO A PAGAR**.
+Muestra, por proveedor: los ítems que se cancelan, cómo se paga, las retenciones calculadas, y
+arriba los totales **ÓRDENES / BRUTO / RETENCIONES / NETO A PAGAR**.
+
+En los pagos combinados aparece **una tabla por medio de pago**: los cheques endosados (con su
+banco y vencimiento), los cheques propios (con la fecha editable) y la transferencia. La etiqueta
+del proveedor dice qué medios lleva, por ejemplo *"Endoso + cheque propio + transferencia"*.
 
 **Qué controlar acá:**
 
@@ -468,7 +508,7 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | Estado | Color | Significa | Qué hacer |
 |---|---|---|---|
 | **Listo** | Verde | Se va a enviar | Nada |
-| **Carga manual** | Amarillo | Modalidad no soportada, mixta, mal escrita, o sin ítems facturables | Corregir el Excel y recargar, o pagarlo a mano en Finnegans |
+| **Carga manual** | Amarillo | Modalidad no soportada, mixta, mal escrita, sin ítems facturables, o un endoso que no cierra exacto | Corregir el Excel y recargar, o pagarlo a mano en Finnegans. El motivo exacto se ve en la pantalla de resultados |
 | **Excede chequera** | Rojo | Los cheques no entran en el rango de la chequera, o ÚLTIMO Nº / LÍMITE están vacíos o no son números | Completar los números, o preparar una segunda chequera |
 | **Sin ítems** | Rojo | El proveedor quedó sin filas válidas | Revisar el Excel |
 | **Sin saldo** | Gris | Los documentos ya no tienen saldo pendiente en Finnegans | Verificar si ya se pagó; si no, revisar el formato de la columna Documento |
