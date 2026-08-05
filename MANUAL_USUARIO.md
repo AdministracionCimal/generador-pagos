@@ -137,8 +137,10 @@ abrir la Configuración.
 | TALONARIOS | Talonario orden de pago | `TE-OP` | Talonario del que se estima el número de OP |
 | CUENTAS CONTABLES | Cheques propios | `02.01.04.01.0009` | Cuenta que se acredita al emitir cheque |
 | CUENTAS CONTABLES | Transferencias | `01.01.01.02.0006` | Cuenta bancaria de la transferencia |
+| CUENTAS CONTABLES | Endosos (valores en cartera) | `01.01.01.03.0001` | Cuenta donde están los cheques de terceros que se endosan |
 | OPERACIONES BANCARIAS | Cheques propios | `EMCHPROP` | Tipo de operación bancaria del cheque |
 | OPERACIONES BANCARIAS | Transferencias | `TLote` | Tipo de operación bancaria de la transferencia |
+| OPERACIONES BANCARIAS | Endosos | `CHENDOSADOS` | Tipo de operación bancaria del endoso |
 
 Estos valores **ya vienen correctos para Cimalco**. Sólo se tocan si contabilidad cambia el
 plan de cuentas o el talonario. Un valor mal puesto acá no da error en la app: la OP se

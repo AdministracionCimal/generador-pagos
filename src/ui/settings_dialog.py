@@ -158,7 +158,9 @@ class SettingsDialog(QDialog):
         # — Cuentas contables ────────────────────────────────────────────
         self._combo_cuenta_cheque = self._make_combo()
         self._combo_cuenta_transf = self._make_combo()
-        for combo in (self._combo_cuenta_cheque, self._combo_cuenta_transf):
+        self._combo_cuenta_valores = self._make_combo()
+        for combo in (self._combo_cuenta_cheque, self._combo_cuenta_transf,
+                      self._combo_cuenta_valores):
             combo.setMinimumWidth(320)
 
         _saved_ch_cod = cfg.get("cuenta_banco_codigo", "02.01.04.01.0009")
@@ -169,9 +171,14 @@ class SettingsDialog(QDialog):
         _saved_tr_nom = cfg.get("cuenta_banco_transferencia_nombre", _saved_tr_cod)
         self._combo_cuenta_transf.addItem(_saved_tr_nom, _saved_tr_cod)
 
+        _saved_va_cod = cfg.get("cuenta_valores_codigo", "01.01.01.03.0001")
+        _saved_va_nom = cfg.get("cuenta_valores_nombre", _saved_va_cod)
+        self._combo_cuenta_valores.addItem(_saved_va_nom, _saved_va_cod)
+
         # — Operaciones bancarias ────────────────────────────────────────
         self._combo_cheque = self._make_combo()
         self._combo_transf = self._make_combo()
+        self._combo_endoso = self._make_combo()
         self._combo_cheque.addItem(
             cfg.get("op_bancaria_cheque_nombre", "Emisión de cheque propio"),
             cfg.get("op_bancaria_cheque_codigo", "EMCHPROP"),
@@ -179,6 +186,10 @@ class SettingsDialog(QDialog):
         self._combo_transf.addItem(
             cfg.get("op_bancaria_transferencia_nombre", "Transferencia por Lote"),
             cfg.get("op_bancaria_transferencia_codigo", "TLote"),
+        )
+        self._combo_endoso.addItem(
+            cfg.get("op_bancaria_endoso_nombre", "Endoso de cheque a tercero"),
+            cfg.get("op_bancaria_endoso_codigo", "CHENDOSADOS"),
         )
         self._lbl_ops_estado = QLabel("")
         self._lbl_ops_estado.setObjectName("Muted")
@@ -235,6 +246,7 @@ class SettingsDialog(QDialog):
         form_cuentas.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form_cuentas.addRow("Cheques propios",  self._combo_cuenta_cheque)
         form_cuentas.addRow("Transferencias",   self._combo_cuenta_transf)
+        form_cuentas.addRow("Endosos (valores en cartera)", self._combo_cuenta_valores)
 
         # ── Sección OPERACIONES BANCARIAS ─────────────────────────────────
         grp_ops = QGroupBox("OPERACIONES BANCARIAS")
@@ -256,6 +268,12 @@ class SettingsDialog(QDialog):
         combo_row.addLayout(_col("TRANSFERENCIAS",  self._combo_transf))
         combo_row.addStretch()
         vbox_ops.addLayout(combo_row)
+
+        endoso_row = QHBoxLayout()
+        endoso_row.setSpacing(16)
+        endoso_row.addLayout(_col("ENDOSOS", self._combo_endoso))
+        endoso_row.addStretch()
+        vbox_ops.addLayout(endoso_row)
         vbox_ops.addWidget(self._lbl_ops_estado)
 
         # ── Scroll area con las secciones ─────────────────────────────────
@@ -409,15 +427,19 @@ class SettingsDialog(QDialog):
     def _on_ops_listas(self, activos: list) -> None:
         cur_cheque = self._combo_cheque.currentData()
         cur_transf = self._combo_transf.currentData()
+        cur_endoso = self._combo_endoso.currentData()
         self._combo_cheque.clear()
         self._combo_transf.clear()
+        self._combo_endoso.clear()
         for o in activos:
             cod = o.get("codigo") or o.get("Codigo", "")
             nom = o.get("nombre") or o.get("Nombre") or cod
             self._combo_cheque.addItem(nom, cod)
             self._combo_transf.addItem(nom, cod)
+            self._combo_endoso.addItem(nom, cod)
         for combo, saved in [(self._combo_cheque, cur_cheque),
-                              (self._combo_transf, cur_transf)]:
+                              (self._combo_transf, cur_transf),
+                              (self._combo_endoso, cur_endoso)]:
             combo.completer().setModel(combo.model())
             theme.style_combo_popup(combo)
             idx = combo.findData(saved)
@@ -450,10 +472,12 @@ class SettingsDialog(QDialog):
     def _on_cuentas_listas(self, cuentas: list) -> None:
         saved_ch = self._combo_cuenta_cheque.currentData() or self._cfg.get("cuenta_banco_codigo", "")
         saved_tr = self._combo_cuenta_transf.currentData() or self._cfg.get("cuenta_banco_transferencia_codigo", "")
+        saved_va = self._combo_cuenta_valores.currentData() or self._cfg.get("cuenta_valores_codigo", "")
         sorted_cuentas = sorted(cuentas, key=lambda x: x.get("nombre", x.get("Nombre", "")))
         for combo, saved in [
             (self._combo_cuenta_cheque, saved_ch),
             (self._combo_cuenta_transf, saved_tr),
+            (self._combo_cuenta_valores, saved_va),
         ]:
             combo.clear()
             for c in sorted_cuentas:
@@ -478,6 +502,7 @@ class SettingsDialog(QDialog):
         emp_nom = self._combo_empresa.currentText().strip()
         ch_cod  = self._combo_cuenta_cheque.currentData() or ""
         tr_cod  = self._combo_cuenta_transf.currentData() or ""
+        va_cod  = self._combo_cuenta_valores.currentData() or ""
 
         def _strip_codigo(text: str, cod: str) -> str:
             suffix = f"  ({cod})"
@@ -485,6 +510,7 @@ class SettingsDialog(QDialog):
 
         ch_nom = _strip_codigo(self._combo_cuenta_cheque.currentText(), ch_cod)
         tr_nom = _strip_codigo(self._combo_cuenta_transf.currentText(), tr_cod)
+        va_nom = _strip_codigo(self._combo_cuenta_valores.currentText(), va_cod)
 
         self._cfg.update({
             "base_url":                          url,
@@ -496,12 +522,16 @@ class SettingsDialog(QDialog):
             "cuenta_banco_nombre":               ch_nom,
             "cuenta_banco_transferencia_codigo": tr_cod,
             "cuenta_banco_transferencia_nombre": tr_nom,
+            "cuenta_valores_codigo":             va_cod or "01.01.01.03.0001",
+            "cuenta_valores_nombre":             va_nom,
             "banco_codigo":                      self._banco_codigo.text().strip(),
             "talonario_op_codigo":               self._talonario_op_codigo.text().strip() or "TE-OP",
             "op_bancaria_cheque_codigo":          self._combo_cheque.currentData() or "EMCHPROP",
             "op_bancaria_cheque_nombre":          self._combo_cheque.currentText(),
             "op_bancaria_transferencia_codigo":   self._combo_transf.currentData() or "TLote",
             "op_bancaria_transferencia_nombre":   self._combo_transf.currentText(),
+            "op_bancaria_endoso_codigo":          self._combo_endoso.currentData() or "CHENDOSADOS",
+            "op_bancaria_endoso_nombre":          self._combo_endoso.currentText(),
         })
         config.save(self._cfg)
         self.accept()

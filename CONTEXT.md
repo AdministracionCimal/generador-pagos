@@ -436,7 +436,7 @@ Objetivo: pagar un proveedor combinando medios en la misma celda de «Forma de p
 3. `_construir_ops` llama a `pago_combinado.armar()`. Un `RepartoError` (endoso que no cierra, cheque que no está en cartera, banco irresoluble) pasa el proveedor a `MANUAL` con el motivo y lo suma a las advertencias
 4. `mapper` emite los tramos en el orden endosos → cheques propios → transferencia, igual que las OPs cargadas a mano
 
-**Ojo con las cuentas contables:** en un pago combinado los cheques propios salen de `02.01.04.01.0009`, la transferencia de `01.01.01.02.0006` y el endoso de `01.01.01.03.0001`. Por eso `OpPago` tiene `cuenta_banco_transferencia_codigo` además de `cuenta_banco_codigo` (si está vacía se usa la otra, que es lo que hace la modalidad TRANSFERENCIA pura).
+**Ojo con las cuentas contables:** en un pago combinado los cheques propios salen de `02.01.04.01.0009`, la transferencia de `01.01.01.02.0006` y el endoso de `01.01.01.03.0001`. Por eso `OpPago` tiene `cuenta_banco_transferencia_codigo` además de `cuenta_banco_codigo` (si está vacía se usa la otra, que es lo que hace la modalidad TRANSFERENCIA pura). Las cuatro cosas —las tres cuentas y los tres tipos de operación bancaria— se eligen en `SettingsDialog`, igual que las de cheque y transferencia.
 
 **Fraccionamiento:** `_parte()` en `fraccionador` **trunca** y le deja el resto al último cheque, como Finnegans. Antes redondeaba hacia arriba: mismo total, distribución distinta.
 
