@@ -78,6 +78,32 @@ class Endpoints:
             f"&NumeroDocumento={quote(comprobante, safe='')}"
         )
 
+    def situacion_cheques(
+        self,
+        token: str,
+        fecha_hasta: str,
+        tipo_cheque: str = "1",
+        estado: str = "En Cartera",
+        empresa: str = "",
+    ) -> str:
+        """Cheques por estado. `TipoCheque=1` son los de terceros; `Estado` va por
+        nombre («En Cartera»), no por código.
+
+        `empresa` tiene que ser el código de negocio limpio («EMPRE01»): con el ID
+        interno («EMPRESA_EMPRE01») el reporte devuelve 200 y cero filas.
+        """
+        from urllib.parse import quote
+        url = (
+            f"{self.base}/reports/ApiSituacionCheques"
+            f"?ACCESS_TOKEN={token}"
+            f"&PARAMWEBREPORT_FechaHasta={fecha_hasta}"
+            f"&PARAMWEBREPORT_TipoCheque={quote(str(tipo_cheque), safe='')}"
+            f"&PARAMWEBREPORT_Estado={quote(estado, safe='')}"
+        )
+        if empresa:
+            url += f"&PARAMWEBREPORT_Empresa={quote(empresa, safe='')}"
+        return url
+
     def composicion_saldo_proveedor(self, cuit: str, fecha: str, token: str) -> str:
         from urllib.parse import quote
         return (

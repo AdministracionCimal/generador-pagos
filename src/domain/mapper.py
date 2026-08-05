@@ -44,10 +44,7 @@ def _item_a_ctacte(item, cuenta_proveedor: str) -> dict:
     }
 
 
-def _empresa_codigo_limpio(cod: str) -> str:
-    """Quita el prefijo «EMPRESA_» que devuelve /empresa/list (ID interno).
-    El POST de OPs requiere el código de negocio sin prefijo (ej. «EMPRE01»)."""
-    return cod.removeprefix("EMPRESA_") if isinstance(cod, str) else cod
+from .empresa import codigo_limpio as _empresa_codigo_limpio
 
 
 def armar_post(op: OpPago) -> dict:

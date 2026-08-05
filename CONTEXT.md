@@ -408,6 +408,28 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 
 ---
 
+## En curso: pagos combinados y endosos (2026-08-04)
+
+Objetivo: pagar un proveedor combinando medios en la misma celda de «Forma de pago» — cheque propio, transferencia y **endoso de cheques de terceros en cartera**.
+
+**Decisiones del usuario (cerradas):**
+
+1. Todo se indica en «Forma de pago», con tramos separados por `+`, y los porcentajes se admiten: `Ch 10/09 + transferencia 30%` → la transferencia paga el 30% y el cheque el resto.
+2. **La retención se descuenta de la transferencia**; si no hay, del cheque propio. Nunca del endoso (su importe es intocable). Criterio: pagar menos ahora y más a plazo.
+3. **Sólo se automatizan los pagos que cancelan el total exacto.** Si un endoso deja saldo (a favor o en contra), el proveedor va a **carga manual** con la diferencia en el mensaje. Motivo del usuario: al cambiar el importe de la cuenta corriente Finnegans recalcula las retenciones, y esos casos son pocos. Con los endosos que cierran justo se cubre el 98% de las operaciones.
+
+**Verificado contra Finnegans** (OP real cargada a mano, fixture `response_OP-0004-00022502_endosos.json`, anonimizado):
+
+- el tramo de endoso va en `Banco` con `OperacionBancariaCodigo: "CHENDOSADOS"`, `CuentaCodigo: "01.01.01.03.0001"` (Valores a Depositar), `DebeHaber: -1`, el `DocumentoFisicoID` del cheque en cartera, su número, sus fechas, `ChequeraCodigo: null` y el `BancoCodigo` **del librador** (no el nuestro)
+- identidad que tiene que cerrar: `suma(Banco) == (facturas − créditos) − retenciones`. Los endosos van al nominal y los cheques propios se reparten el resto; el último absorbe los centavos
+- cartera: `ApiSituacionCheques` con `TipoCheque=1` y `Estado="En Cartera"` (por nombre). **Filtrar siempre por empresa**: la respuesta mezcla sociedades del grupo (20 de CIMALCO, 1 de PER SAS, 1 de RTC) y con el ID interno `EMPRESA_EMPRE01` devuelve **200 con cero filas**
+
+**Hecho:** `domain/forma_pago.py` (gramática + reparto), `domain/cartera.py` (lectura, búsqueda por número ignorando ceros, vencidos, guarda de multi-empresa), `domain/empresa.py` (saneo del prefijo, ahora compartido con `mapper`), `endpoints.situacion_cheques()` y `client.get_cheques_en_cartera()`.
+
+**Pendiente:** el `BancoCodigo` del cheque endosado (el reporte de cartera trae el nombre del banco, no el código) y la integración: `clasificador` (levantar la restricción de modalidad mixta y mandar a MANUAL los `RepartoError`), `fraccionador`, `mapper` (tramo de endoso), y la pantalla previa (desglose por tramo + alerta de cheque en cartera vencido).
+
+---
+
 ## Estado de Fases (plan post-manual, 2026-08-03)
 
 | Fase | Contenido | Estado |

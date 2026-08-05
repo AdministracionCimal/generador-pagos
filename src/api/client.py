@@ -142,6 +142,26 @@ class FinnegansClient:
         data = self._parse_response(resp)
         return data if isinstance(data, list) else []
 
+    def get_cheques_en_cartera(self, empresa: str, fecha_hasta: str) -> list[dict]:
+        """Cheques de terceros en cartera de esa empresa (para endosar).
+
+        `empresa` es el código de negocio limpio («EMPRE01»). Con el ID interno
+        («EMPRESA_EMPRE01») Finnegans responde 200 con la lista vacía, así que un
+        resultado vacío puede ser eso y no una cartera sin cheques.
+        """
+        if self._token is None or time.time() >= self._token_expires_at:
+            self._fetch_token()
+        resp = httpx.get(
+            self.endpoints.situacion_cheques(
+                self._token, fecha_hasta, empresa=empresa
+            ),
+            timeout=45,
+        )
+        if resp.status_code != 200:
+            raise ApiError(resp.status_code, resp.text[:200])
+        data = self._parse_response(resp)
+        return data if isinstance(data, list) else []
+
     def get_aplicacion_factura_compra(self, comprobante: str) -> list[dict]:
         if self._token is None or time.time() >= self._token_expires_at:
             self._fetch_token()
