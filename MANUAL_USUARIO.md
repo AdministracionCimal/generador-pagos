@@ -319,9 +319,16 @@ pasó, asume el año siguiente. De ahí el riesgo: hoy 03/08/2026, escribir `Ch 
 cheque al **08/05/2027**. Un error de tipeo en el día puede mandar el cheque casi un año
 hacia adelante. Por eso existe la alerta naranja en la pantalla previa — **hay que mirarla**.
 
-**Un proveedor no puede mezclar modalidades.** Si tiene una fila `Ch 10/06` y otra
-`transferencia`, queda en **Carga manual** con el motivo “Modalidad mixta”. Hay que pagarlo
-a mano en Finnegans, o dividirlo en dos tandas.
+**Ojo con la diferencia entre mezclar en la misma celda y mezclar entre filas:**
+
+- ✅ **En la misma celda** está soportado, y es el pago combinado que se explicó arriba:
+  `Ch 10/06 + transferencia 30%`.
+- ❌ **Entre filas distintas del mismo proveedor** no: si una fila dice `Ch 10/06` y otra dice
+  `transferencia`, el proveedor queda en **Carga manual** con el motivo “Modalidad mixta”.
+
+El motivo es que el reparto se hace sobre el **total del proveedor**, así que todas sus filas
+tienen que indicar la misma combinación. Si de verdad necesitás pagar una factura por
+transferencia y otra por cheque, van en dos tandas separadas (o se carga a mano).
 
 ---
 
@@ -359,6 +366,11 @@ créditos al Haber. Es exactamente como trabaja Finnegans.
 - Si **todas las facturas** de un proveedor tienen **exactamente las mismas fechas**, se
   consolidan en **un solo juego de N cheques por el total**, en lugar de N cheques por factura.
 - Si las fechas difieren, cada factura se fracciona por separado.
+- En un **pago combinado**, primero se calcula cuánto le toca al tramo de cheque (el total menos
+  los endosos y los porcentajes de los otros tramos) y recién eso se divide entre sus fechas.
+- Al dividir, cada cheque se **trunca** al centavo y el último se queda con el resto, igual que
+  lo hace Finnegans: por ejemplo $11.089.819,72 en 8 cheques da siete de $1.386.227,46 y uno
+  de $1.386.227,50.
 - Los números de cheque salen del campo **ÚLTIMO Nº** de la pantalla principal: se emite
   desde `último + 1` en adelante, en orden.
 
@@ -558,7 +570,9 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | Síntoma | Causa | Solución |
 |---|---|---|
 | Un proveedor quedó en Carga manual sin motivo aparente | Texto de forma de pago no reconocido. Los casos y el por qué están en la sección 4.6 | El estado en la pantalla de resultados muestra el texto exacto que no se pudo interpretar |
-| “Modalidad mixta” | El proveedor mezcla cheque y transferencia | Unificar, o partir en dos tandas |
+| “Modalidad mixta” | Dos filas del mismo proveedor indican formas de pago distintas | Poner la misma combinación en todas sus filas (se pueden combinar medios en la misma celda), o partir en dos tandas |
+| “los cheques a endosar suman $X y el neto a pagar es $Y” | El endoso no cierra exacto | Elegir otra combinación de cheques, agregar un tramo por la diferencia, o cargarlo a mano |
+| “no se encontró en cartera el cheque N” | El número no existe, no es de esta empresa o ya no está en cartera | Verificar el número contra Finnegans |
 | Salen menos cheques de los esperados | Falta alguna fecha en la columna Forma de pago | Revisar el texto: cada `dd/mm` genera un cheque |
 | Un cheque aparece en naranja diciendo que la fecha no existe | El Excel tenía `31/02` o similar | Poner la fecha correcta en la columna Vencimiento (el cheque no se pierde) |
 | Un cheque quedó con fecha de hoy | La forma de pago no traía fechas y se usó la fecha de respaldo | Corregir la fecha en la pantalla previa |
@@ -637,6 +651,10 @@ por tanda**. Si hay varios usuarios, asignar una chequera distinta a cada uno.
 - No anula ni corrige OPs ya creadas: eso se hace en Finnegans.
 - No paga proveedores en **Carga manual**: quedan siempre para carga a mano.
 - No valida que el proveedor esté correctamente dado de alta más allá del CUIT.
+- No hace **pagos parciales**: los tramos tienen que cubrir el total exacto de lo que dice la
+  planilla. Si querés pagar una parte, poné el importe parcial en la columna Importe.
+- No genera **saldo a favor** con un endoso que sobra: eso va a Carga manual.
+- No elige los cheques a endosar: hay que indicar los números en la planilla.
 
 ---
 
@@ -680,6 +698,16 @@ Los importes se corrigen en el Excel.
 Se puede: en la pantalla previa, tildá el check *“Confirmo que los cheques a más de 180 días
 están bien”* del cartel naranja y se habilita el envío. Fijate primero en el motivo de la
 alerta, que dice a cuántos días quedó cada cheque.
+
+**¿Cómo sé qué cheques tengo en cartera para endosar?**
+La app **no los lista**: hay que mirarlos en Finnegans (Situación de cheques, tipo terceros,
+estado En Cartera) y escribir los números en la planilla. Al procesar, la app verifica contra
+Finnegans que existan, que sean de la empresa que paga y que sigan en cartera; si no, el
+proveedor va a Carga manual con el detalle.
+
+**¿Puedo endosar un cheque que ya venció?**
+Sí. A diferencia de un cheque propio, acá no se emite nada: se entrega un valor que ya existe,
+así que un vencimiento anterior a la fecha del pago no genera alerta.
 
 **¿Por qué un proveedor no tiene retención?**
 Porque no tiene la retención configurada en Finnegans, porque no hay facturas `FC - ` en la
@@ -796,6 +824,10 @@ PyInstaller puede informar éxito sin haber reemplazado el binario.
 | **ÚLTIMO Nº** | Último cheque ya emitido; la app sigue desde el siguiente |
 | **Crédito / saldo a favor** | Importe positivo en el Excel (PAGO, NC, MOVFONDOS positivo) que descuenta del total |
 | **Carga manual** | Proveedor que la app no envía: hay que cargarlo a mano en Finnegans |
+| **Endoso** | Entregar al proveedor un cheque de un tercero que teníamos en cartera, en lugar de emitir uno propio |
+| **Cartera** | Los cheques de terceros que recibimos y todavía no depositamos ni endosamos |
+| **Pago combinado** | Un pago que usa varios medios a la vez (endoso, cheque propio, transferencia) |
+| **Tramo** | Cada medio de pago dentro de una «Forma de pago» combinada, separados por `+` |
 | **Cuenta corriente (CtaCte)** | Los documentos que la OP cancela |
 | **ISAR** | Base imponible de la retención de Ganancias |
 | **Fraccionar** | Dividir el importe en varios cheques según las fechas de la forma de pago |
