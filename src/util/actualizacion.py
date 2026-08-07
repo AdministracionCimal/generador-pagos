@@ -31,9 +31,19 @@ _API_RELEASE = (
     "https://api.github.com/repos/AdministracionCimal/generador-pagos/releases/latest"
 )
 _NOMBRE_ASSET     = "GeneradorDePagos.exe"
-_NOMBRE_DESCARGA  = "GeneradorDePagos.nuevo.exe"
-NOMBRE_BACKUP     = "GeneradorDePagos.anterior.exe"
 NOMBRE_SCRIPT     = "actualizar_generador_de_pagos.cmd"
+SUFIJO_BACKUP     = ".anterior"
+SUFIJO_DESCARGA   = ".nuevo"
+
+
+def ruta_hermana(exe: Path, sufijo: str) -> Path:
+    """`Generador De Pagos.exe` + `.anterior` → `Generador De Pagos.anterior.exe`.
+
+    Se deriva del nombre real del `.exe`: el usuario puede haberlo renombrado (el
+    de Cimalco se llama «Generador De Pagos.exe», con espacios) y un nombre fijo
+    dejaba el backup con un nombre que no se parecía al programa.
+    """
+    return exe.with_name(f"{exe.stem}{sufijo}{exe.suffix}")
 
 _RE_COMMIT  = re.compile(r"commit[:\s]+`?([0-9a-f]{7,40})`?", re.I)
 _RE_VERSION = re.compile(r"versi[oó]n[:\s]+v?(\d+\.\d+\.\d+)", re.I)
@@ -172,6 +182,23 @@ def descargar(actu: Actualizacion, destino: Path, progreso=None) -> Path:
 ESPERA_MAX_INTENTOS = 120   # ~2 minutos: si la app no cierra, se rinde sin tocar nada
 
 
+def entorno_limpio(entorno: dict | None = None) -> dict:
+    """Copia del entorno sin las variables que PyInstaller usa internamente.
+
+    El bootloader del `.exe` onefile le pasa a su proceso hijo `_MEIPASS2` (o
+    `_PYI_*` en las versiones nuevas) con la carpeta temporal donde ya
+    descomprimió todo. Si el actualizador hereda esas variables, el `.exe` nuevo
+    arranca creyendo que sus archivos están en la carpeta del proceso **anterior**
+    —que ya se borró— y muere con *"Failed to load Python DLL … _MEIxxxxx\\
+    python311.dll"*. Pasó de verdad al probar la primera actualización.
+    """
+    base = dict(os.environ if entorno is None else entorno)
+    return {
+        k: v for k, v in base.items()
+        if not (k.startswith("_MEI") or k.startswith("_PYI"))
+    }
+
+
 def script_de_swap() -> str:
     """Contenido del `.cmd` que reemplaza el binario.
 
@@ -181,6 +208,10 @@ def script_de_swap() -> str:
 
     Dos cuidados que parecen paranoia y no lo son:
 
+    - el filtrado lo hace **`tasklist`** y `findstr` sólo detecta si vino alguna
+      línea con `.exe`. Buscar el nombre del programa no sirve: `tasklist` trunca
+      la columna a 25 caracteres, así que con un nombre largo no encontraría nada
+      y el script daría por cerrada una app que sigue abierta.
     - `tasklist`, `findstr` y `ping` se llaman con **ruta absoluta**. Si se
       resolvieran por PATH, un `find`/`findstr` de otra herramienta (Git, por
       ejemplo) devuelve error, el loop cree que la app ya cerró y reemplaza el
@@ -202,18 +233,31 @@ def script_de_swap() -> str:
         "",
         ":esperar",
         '"%SYS%\\tasklist.exe" /FI "PID eq %PID%" /NH 2>nul | '
-        '"%SYS%\\findstr.exe" /I /C:"%NOMBRE%" >nul',
-        "if errorlevel 1 goto reemplazar",
+        '"%SYS%\\findstr.exe" /I /C:".exe" >nul',
+        "if errorlevel 1 goto esperar_todas",
         "set /a INTENTOS+=1",
         f"if %{'INTENTOS'}% GEQ {ESPERA_MAX_INTENTOS} goto rendirse",
         '"%SYS%\\ping.exe" -n 2 127.0.0.1 >nul',
         "goto esperar",
+        "",
+        "rem El .exe onefile corre como dos procesos (bootloader + app): esperar",
+        "rem solo al PID deja al padre todavia con el archivo abierto.",
+        ":esperar_todas",
+        '"%SYS%\\tasklist.exe" /FI "IMAGENAME eq %NOMBRE%" /NH 2>nul | '
+        '"%SYS%\\findstr.exe" /I /C:".exe" >nul',
+        "if errorlevel 1 goto reemplazar",
+        "set /a INTENTOS+=1",
+        f"if %{'INTENTOS'}% GEQ {ESPERA_MAX_INTENTOS} goto rendirse",
+        '"%SYS%\\ping.exe" -n 2 127.0.0.1 >nul',
+        "goto esperar_todas",
         "",
         ":reemplazar",
         'if exist "%BACKUP%" del /q "%BACKUP%"',
         'copy /y "%ACTUAL%" "%BACKUP%" >nul',
         'move /y "%NUEVO%" "%ACTUAL%" >nul',
         "if errorlevel 1 goto fallo",
+        "rem Margen para que el antivirus termine con el binario recien escrito.",
+        '"%SYS%\\ping.exe" -n 3 127.0.0.1 >nul',
         'if "%RELANZAR%"=="1" start "" "%ACTUAL%"',
         "exit /b 0",
         "",
@@ -247,7 +291,7 @@ def aplicar(actu: Actualizacion, progreso=None) -> None:
             f"o mové la aplicación a una carpeta propia."
         )
 
-    nuevo = exe.with_name(_NOMBRE_DESCARGA)
+    nuevo = ruta_hermana(exe, SUFIJO_DESCARGA)
     descargar(actu, nuevo, progreso)
 
     script = Path(tempfile.gettempdir()) / NOMBRE_SCRIPT
@@ -256,8 +300,10 @@ def aplicar(actu: Actualizacion, progreso=None) -> None:
     subprocess.Popen(
         [
             "cmd", "/c", str(script),
-            str(os.getpid()), str(exe), str(nuevo), str(exe.with_name(NOMBRE_BACKUP)), "1",
+            str(os.getpid()), str(exe), str(nuevo),
+            str(ruta_hermana(exe, SUFIJO_BACKUP)), "1",
         ],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         close_fds=True,
+        env=entorno_limpio(),
     )

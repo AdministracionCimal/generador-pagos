@@ -311,7 +311,10 @@ Qué avisa hoy:
 
 - **Compara por commit, no por fecha.** El release usa el tag fijo `latest` y el CI publica el asset ~2 min después de compilar, así que `asset.updated_at > BUILD_DATE` siempre: comparar fechas avisaría de una versión nueva que es la que el usuario ya tiene. El body del release declara `Versión: X · commit: <sha>` y `hay_novedad()` compara el prefijo común de los dos shas (el body puede traer el corto y `version.py` el largo). Sin sha local o remoto → no avisa (fail-closed: mejor no avisar que avisar de más)
 - **Descarga verificada**: el asset del release trae `digest: sha256:…`; si el hash no coincide, borra el archivo y no reemplaza nada
-- **El swap lo hace un `.cmd`** en `%TEMP%`, porque el `.exe` en ejecución está bloqueado por su propio proceso. Espera a que el PID muera, guarda `GeneradorDePagos.anterior.exe`, mueve el nuevo sobre el actual y relanza. Dos detalles que costaron un bug real cada uno:
+- **El entorno del actualizador se limpia** (`entorno_limpio()`): el bootloader onefile le pasa al hijo `_MEIPASS2` / `_PYI_*` con su carpeta temporal. Si el `.cmd` las hereda, el `.exe` nuevo cree que sus archivos ya están descomprimidos **en la carpeta del proceso viejo** —que ya se borró— y muere con *"Failed to load Python DLL … `_MEIxxxxx\python311.dll`"*. Pasó en la primera actualización real: el reemplazo funcionó y sólo falló el relanzamiento
+- **Los nombres se derivan del `.exe` real** (`ruta_hermana()`): en Cimalco el programa se llama `Generador De Pagos.exe`, con espacios, y los nombres fijos dejaban el backup con un nombre que no se parecía al programa
+- **El swap lo hace un `.cmd`** en `%TEMP%`, porque el `.exe` en ejecución está bloqueado por su propio proceso. Espera a que el PID muera, **después a que no quede ningún proceso con ese nombre** (el onefile corre como bootloader + app), guarda la copia `.anterior.exe`, mueve el nuevo sobre el actual, espera 2 s y relanza. Detalles que costaron un bug real cada uno:
+  - el filtrado lo hace `tasklist` y `findstr` sólo detecta si vino una línea con `.exe`: buscar el nombre del programa falla porque `tasklist` **trunca la columna a 25 caracteres**, y el script daría por cerrada una app que sigue abierta
   - las herramientas del sistema (`tasklist`, `findstr`, `ping`) se invocan con **ruta absoluta** vía `%SystemRoot%\System32`. Resolviéndolas por PATH, el `find` de Git Bash devolvía error, el loop concluía que la app había cerrado y **reemplazaba el binario en uso**
   - el contador de intentos **no** va dentro de un bloque `( )`: batch expande `%VAR%` al parsear el bloque y quedaría siempre en 0
   - a los ~2 min sin que la app cierre se rinde (`exit /b 2`), borra la descarga y no toca el `.exe`
@@ -403,9 +406,10 @@ Speedup combinado: ~10× (de ~40 s a ~4 s para 20 proveedores).
 15. **Si una fila del Excel se descarta, tiene que quedar registrado en `avisos_out`** — los silencios en la lectura son la clase de bug más caro de esta app: nadie se entera hasta que falta un pago
 16. **El endoso va por el nominal del cheque y nunca absorbe retenciones** — la retención sale de la transferencia y, si no hay, del cheque propio
 17. **Ante una «Forma de pago» ambigua, MANUAL** — nunca adivinar entre cheque y transferencia (`cheque o transferencia` da `False` en las dos funciones). Al ampliar la tolerancia, agregar siempre los casos rechazados a los tests
-18. **El `.cmd` de actualización invoca las herramientas del sistema con ruta absoluta y sin bloques `( )`** — por PATH agarra el `find` de otra herramienta y reemplaza el binario en uso; dentro de un bloque el contador de intentos nunca avanza
-19. **La detección de versión nueva compara commits, nunca fechas** — el CI publica el asset después de compilar, así que por fecha el release siempre parece más nuevo
-20. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
+18. **Todo proceso que lance el `.exe` empaquetado tiene que ir con `entorno_limpio()`** — heredar `_MEIPASS2`/`_PYI_*` hace que el binario nuevo busque sus archivos en la carpeta temporal del proceso viejo
+19. **El `.cmd` de actualización invoca las herramientas del sistema con ruta absoluta y sin bloques `( )`** — por PATH agarra el `find` de otra herramienta y reemplaza el binario en uso; dentro de un bloque el contador de intentos nunca avanza
+20. **La detección de versión nueva compara commits, nunca fechas** — el CI publica el asset después de compilar, así que por fecha el release siempre parece más nuevo
+21. **Hay un hook de seguridad en el entorno que bloquea las ediciones que contengan la llamada a `.exec` de Qt escrita con paréntesis** — para diálogos modales nuevos usar los métodos estáticos (`QMessageBox.question` / `warning`) en lugar de instanciar y lanzar el diálogo a mano
 
 ---
 

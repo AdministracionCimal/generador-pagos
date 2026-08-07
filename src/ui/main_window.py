@@ -673,8 +673,8 @@ class MainWindow(QMainWindow):
             f"Hay una versión nueva disponible ({actu.descripcion()}).<br><br>"
             f"Tu versión: {version_larga()}<br><br>"
             f"La app la descarga, verifica el archivo y se reinicia sola. "
-            f"Guarda una copia de la versión actual como "
-            f"<code>{actualizacion.NOMBRE_BACKUP}</code>.<br><br>"
+            f"Guarda una copia de la versión actual al lado del programa, "
+            f"con <code>{actualizacion.SUFIJO_BACKUP}</code> en el nombre.<br><br>"
             f"¿Actualizar ahora?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,

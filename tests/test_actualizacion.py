@@ -3,13 +3,18 @@ from datetime import datetime, timezone
 
 import pytest
 
+from pathlib import Path
+
 from src.util.actualizacion import (
     ESPERA_MAX_INTENTOS,
+    SUFIJO_BACKUP,
+    SUFIJO_DESCARGA,
     ActualizacionError,
-    NOMBRE_BACKUP,
     descargar,
+    entorno_limpio,
     hay_novedad,
     leer_release,
+    ruta_hermana,
     script_de_swap,
 )
 
@@ -121,6 +126,20 @@ class TestScriptDeSwap:
             assert f'"%SYS%\\{herramienta}"' in s, herramienta
         assert 'set "SYS=%SystemRoot%\\System32"' in s
 
+    def test_espera_a_todos_los_procesos_no_solo_al_pid(self):
+        """El .exe onefile corre como dos procesos: esperar sólo al PID deja al
+        bootloader padre todavía con el archivo abierto."""
+        s = script_de_swap()
+        assert ":esperar_todas" in s
+        assert 'IMAGENAME eq %NOMBRE%' in s
+        assert s.index(":esperar_todas") < s.index(":reemplazar")
+
+    def test_deja_margen_antes_de_relanzar(self):
+        s = script_de_swap()
+        reemplazo = s[s.index(":reemplazar"):s.index("exit /b 0")]
+        assert reemplazo.index("move /y") < reemplazo.index("ping.exe")
+        assert reemplazo.index("ping.exe") < reemplazo.index("start")
+
     def test_se_rinde_si_la_app_no_cierra(self):
         s = script_de_swap()
         assert f"GEQ {ESPERA_MAX_INTENTOS} goto rendirse" in s
@@ -180,7 +199,46 @@ class TestDescargar:
         assert vistos == [(len(contenido), actu.tamanio)]
 
 
-def test_nombre_del_backup_es_reconocible():
-    """Si el swap falla a mitad, el usuario tiene que poder identificar la copia."""
-    assert NOMBRE_BACKUP.endswith(".exe")
-    assert "anterior" in NOMBRE_BACKUP
+class TestEntornoDelActualizador:
+    """El bug real de la primera actualización: el .exe nuevo heredaba la carpeta
+    temporal del proceso viejo y moria con «Failed to load Python DLL»."""
+
+    def test_saca_las_variables_de_pyinstaller(self):
+        sucio = {
+            "PATH": "C:\\Windows",
+            "_MEIPASS2": "C:\\Users\\x\\AppData\\Local\\Temp\\_MEI113162\\",
+            "_PYI_ARCHIVE_FILE": "C:\\app\\GeneradorDePagos.exe",
+            "_PYI_APPLICATION_HOME_DIR": "C:\\Temp\\_MEI113162",
+        }
+        limpio = entorno_limpio(sucio)
+        assert limpio == {"PATH": "C:\\Windows"}
+
+    def test_conserva_el_resto_del_entorno(self):
+        sucio = {"APPDATA": "C:\\Users\\x\\AppData\\Roaming", "TEMP": "C:\\Temp"}
+        assert entorno_limpio(sucio) == sucio
+
+    def test_no_le_pasa_variables_de_pyinstaller_al_proceso_hijo(self, monkeypatch):
+        monkeypatch.setenv("_MEIPASS2", "C:\\Temp\\_MEI999")
+        assert "_MEIPASS2" not in entorno_limpio()
+
+
+class TestNombresDerivadosDelExe:
+    """El programa puede tener otro nombre: el de Cimalco se llama
+    «Generador De Pagos.exe», con espacios. El backup y la descarga se derivan de
+    ese nombre para que se reconozcan al lado del original."""
+
+    def test_backup_junto_al_exe_con_su_nombre(self):
+        exe = Path(r"C:\GeneradorDePagos\Generador De Pagos.exe")
+        assert ruta_hermana(exe, SUFIJO_BACKUP).name == "Generador De Pagos.anterior.exe"
+
+    def test_descarga_junto_al_exe_con_su_nombre(self):
+        exe = Path(r"C:\app\GeneradorDePagos.exe")
+        assert ruta_hermana(exe, SUFIJO_DESCARGA).name == "GeneradorDePagos.nuevo.exe"
+
+    def test_queda_en_la_misma_carpeta(self):
+        exe = Path(r"D:\Programas\App.exe")
+        assert ruta_hermana(exe, SUFIJO_BACKUP).parent == exe.parent
+
+    def test_los_sufijos_son_reconocibles(self):
+        assert "anterior" in SUFIJO_BACKUP
+        assert "nuevo" in SUFIJO_DESCARGA
