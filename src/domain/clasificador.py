@@ -69,6 +69,18 @@ def clasificar(proveedor: ProveedorTanda) -> ProveedorTanda:
         proveedor.modalidad = Modalidad.TRANSFERENCIA
         return proveedor
 
+    def _es_medio_unico(texto: str) -> bool:
+        """Un solo tramo y sin porcentaje, del tipo que sea."""
+        tramos = tramos_por_texto[texto]
+        return len(tramos) == 1 and tramos[0].porcentaje is None
+
+    # Mezcla por factura: cada ítem indica UN medio y no todos coinciden (ej. una
+    # factura por transferencia y otra en cheques). Acá no hay porcentajes que
+    # repartir: cada factura se paga por su importe, con su medio.
+    if all(_es_medio_unico(t) for t in textos_l):
+        proveedor.modalidad = Modalidad.MIXTO
+        return proveedor
+
     # Pago combinado: el reparto se hace sobre el total del proveedor, así que
     # todos los ítems pagables tienen que indicar la misma combinación.
     textos_unicos = {t for t in textos_l if t}

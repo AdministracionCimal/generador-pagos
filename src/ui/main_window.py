@@ -26,8 +26,16 @@ from src.domain.cartera import leer_cartera, validar_una_empresa
 from src.domain.clasificador import clasificar
 from src.domain.documento import es_fc, es_pago, normalizar as normalizar_doc
 from src.domain.empresa import codigo_limpio as empresa_codigo_limpio
-from src.domain.forma_pago import ENDOSO, RepartoError, cheques_previstos
-from src.domain.pago_combinado import armar as armar_pago_combinado
+from src.domain.forma_pago import (
+    ENDOSO,
+    RepartoError,
+    cheques_previstos,
+    parsear_tramos,
+)
+from src.domain.pago_combinado import (
+    armar as armar_pago_combinado,
+    armar_por_item as armar_pago_por_item,
+)
 from src.domain.fraccionador import fraccionar_proveedor
 from src.domain.mapper import armar_post
 from src.domain.models import Modalidad, OpPago, ProveedorTanda
@@ -1129,6 +1137,13 @@ class MainWindow(QMainWindow):
                 # sale de contar las fechas del tramo de cheque.
                 n_cheques = cheques_previstos(p.tramos, fecha_emision=date.today())
                 cheques_usados += n_cheques
+            elif p.modalidad == Modalidad.MIXTO and ultimo is not None:
+                # Cada factura aporta los cheques de su propia «Forma de pago».
+                n_cheques = sum(
+                    cheques_previstos(parsear_tramos(i.modalidad_pago), date.today())
+                    for i in p.items if i.importe > 0
+                )
+                cheques_usados += n_cheques
 
             estado = self._calcular_estado(p, n_cheques, ultimo, limite, cheques_usados - n_cheques)
             filas.append((p, n_cheques, estado))
@@ -1219,7 +1234,7 @@ class MainWindow(QMainWindow):
         if p.modalidad == Modalidad.MANUAL:
             return "MANUAL"
         if p.modalidad == Modalidad.CHEQUE_PROPIO or (
-            p.modalidad == Modalidad.COMBINADO and n_cheques
+            p.modalidad in (Modalidad.COMBINADO, Modalidad.MIXTO) and n_cheques
         ):
             if ultimo is None or limite is None:
                 return "EXCEDE"
@@ -1615,6 +1630,32 @@ class MainWindow(QMainWindow):
                     self._proveedores_overflow.append(p)
                     numero_desde -= len(cheques)  # liberar los números reservados
                     continue
+
+            elif p.modalidad == Modalidad.MIXTO:
+                # Cada factura con su medio: los importes salen de los ítems, no
+                # de porcentajes.
+                total_ret = sum(
+                    (r.get("Importe") or _D("0")) for r in retenciones_post
+                )
+                try:
+                    pago = armar_pago_por_item(
+                        p, total_ret, cheques_cartera, mapa_bancos,
+                        numero_desde=numero_desde, fecha_emision=date.today(),
+                    )
+                except RepartoError as exc:
+                    p.modalidad = Modalidad.MANUAL
+                    p.motivo_manual = str(exc)
+                    self._ops_advertencias.append(f"• {p.nombre}: {exc}")
+                    continue
+                cheques = pago.cheques
+                endosos = pago.endosos
+                importe_transferencia = pago.importe_transferencia
+                if cheques:
+                    numero_desde = pago.proximo_numero_cheque
+                    if limite and (numero_desde - 1) > limite:
+                        self._proveedores_overflow.append(p)
+                        numero_desde -= len(cheques)
+                        continue
 
             elif p.modalidad == Modalidad.COMBINADO:
                 # El reparto necesita el total de retenciones, no los ítems ya

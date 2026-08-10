@@ -291,8 +291,9 @@ normal y no genera alerta.
 
 **Reglas de los pagos combinados:**
 
-- Todos los ítems del mismo proveedor tienen que indicar **la misma** combinación (el reparto se
-  hace sobre el total del proveedor).
+- Si se usan **porcentajes**, todas las filas del proveedor tienen que indicar la misma
+  combinación (el reparto se hace sobre el total del proveedor). Para pagar cada factura de una
+  manera distinta, ver más abajo: ahí cada fila lleva un solo medio y no hacen falta porcentajes.
 - Si hay dos tramos sin porcentaje, no se sabe cómo repartir → Carga manual.
 - Si todos los tramos llevan porcentaje, tienen que sumar 100%.
 - Si un endoso **no cierra exacto** —queda saldo a favor o en contra— el proveedor va a **Carga
@@ -325,16 +326,31 @@ hacia adelante. Por eso existe la alerta naranja en la pantalla previa — **hay
 > La lista completa de todo lo que se puede escribir —y de lo que no— está en el
 > **Anexo C**, que se puede imprimir por separado para acordar un estándar.
 
-**Ojo con la diferencia entre mezclar en la misma celda y mezclar entre filas:**
+### Cada factura con su propia forma de pago
 
-- ✅ **En la misma celda** está soportado, y es el pago combinado que se explicó arriba:
-  `Ch 10/06 + transferencia 30%`.
-- ❌ **Entre filas distintas del mismo proveedor** no: si una fila dice `Ch 10/06` y otra dice
-  `transferencia`, el proveedor queda en **Carga manual** con el motivo “Modalidad mixta”.
+Un proveedor con varias facturas puede pagar **cada una de una manera distinta**. Se escribe en
+la fila de cada factura, sin nada especial:
 
-El motivo es que el reparto se hace sobre el **total del proveedor**, así que todas sus filas
-tienen que indicar la misma combinación. Si de verdad necesitás pagar una factura por
-transferencia y otra por cheque, van en dos tandas separadas (o se carga a mano).
+| Factura | Forma de pago | Se paga |
+|---|---|---|
+| FC - 100 | `Ch 10/09 - 20/09` | 2 cheques por el importe de esa factura |
+| FC - 101 | `Ch 15/10` | 1 cheque por el importe de esa factura |
+| FC - 102 | `transferencia` | Por transferencia |
+| FC - 103 | `Endoso 11139918` | Con ese cheque de cartera |
+
+Acá **no hay porcentajes**: el importe de cada medio es la suma de las facturas que lo eligen.
+Un endoso indicado así tiene que cubrir **exactamente** el importe de su factura.
+
+**Las retenciones y los créditos se descuentan de la transferencia**, y si no hay (o no
+alcanza), de los cheques. Es el mismo criterio del pago combinado: pagar menos hoy y más a
+plazo. Ejemplo: FC de $1.000.000 por transferencia + FC de $1.000.000 en cheque, con $100.000
+de retención → **transferencia $900.000** y **cheque $1.000.000**.
+
+**Lo único que no se puede mezclar entre filas son los porcentajes.** Si una fila dice
+`Ch 10/06 + transferencia 30%` y otra dice `transferencia`, el proveedor queda en Carga manual:
+los porcentajes se calculan sobre el total del proveedor y mezclarlos con “cada factura su
+medio” sería ambiguo. En ese caso, o todas las filas dicen la misma combinación con
+porcentajes, o cada fila indica un solo medio.
 
 ---
 
@@ -576,7 +592,7 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | Síntoma | Causa | Solución |
 |---|---|---|
 | Un proveedor quedó en Carga manual sin motivo aparente | Texto de forma de pago no reconocido. Los casos y el por qué están en la sección 4.6 | El estado en la pantalla de resultados muestra el texto exacto que no se pudo interpretar |
-| “Modalidad mixta” | Dos filas del mismo proveedor indican formas de pago distintas | Poner la misma combinación en todas sus filas (se pueden combinar medios en la misma celda), o partir en dos tandas |
+| “Modalidad mixta” | Una fila del proveedor usa porcentajes (`+ transferencia 30%`) y otra no | Los porcentajes van sobre el total del proveedor: o todas las filas dicen la misma combinación, o cada fila indica un solo medio (eso sí se puede mezclar) |
 | “los cheques a endosar suman $X y el neto a pagar es $Y” | El endoso no cierra exacto | Elegir otra combinación de cheques, agregar un tramo por la diferencia, o cargarlo a mano |
 | “no se encontró en cartera el cheque N” | El número no existe, no es de esta empresa o ya no está en cartera | Verificar el número contra Finnegans |
 | Salen menos cheques de los esperados | Falta alguna fecha en la columna Forma de pago | Revisar el texto: cada `dd/mm` genera un cheque |
@@ -920,7 +936,24 @@ Reglas: **un solo tramo de cada tipo**; el tramo **sin** porcentaje se queda con
 todos llevan porcentaje deben **sumar 100%**; los endosos van por el nominal del cheque y la
 retención se descuenta de la transferencia (o del cheque propio si no hay transferencia).
 
-### C.6 Lo que NO se acepta, y qué dice la app
+### C.6 Cada factura con su propia forma de pago
+
+No hace falta ninguna notación especial: se escribe el medio en la fila de cada factura. La app
+suma las facturas de cada medio y paga cada una como corresponde.
+
+| Ejemplo de planilla | Resultado |
+|---|---|
+| FC-100 `Ch 10/09 - 20/09` · FC-101 `Ch 15/10` | 3 cheques: 2 de la primera factura y 1 de la segunda |
+| FC-100 `transferencia` · FC-101 `Ch 10/09` | 1 transferencia + 1 cheque |
+| FC-100 `Endoso 11139918` · FC-101 `transferencia` | 1 endoso (por el importe de esa factura) + 1 transferencia |
+| FC-100 `Ch 10/09` · FC-101 `transferencia` · FC-102 `Endoso 11139918` | Los tres medios en la misma OP |
+
+- El **endoso** indicado en una fila tiene que cubrir **exactamente** el importe de esa factura.
+- **Retenciones y créditos salen de la transferencia**; si no hay o no alcanza, de los cheques.
+- **No se pueden mezclar porcentajes entre filas**: si una fila usa `+ NN%`, todas tienen que
+  decir la misma combinación.
+
+### C.7 Lo que NO se acepta, y qué dice la app
 
 | Se escribe | Mensaje |
 |---|---|
@@ -930,7 +963,7 @@ retención se descuenta de la transferencia (o del cheque propio si no hay trans
 | `trans` | *no se reconoció ninguna forma de pago* (muy corto para asumir) |
 | `efectivo` / `mercado pago` / `Tarjeta de Crédito` | *no se reconoció ninguna forma de pago* |
 | `cheque o transferencia` | *no se reconoció ninguna forma de pago* (ambiguo: no se adivina) |
-| `Ch 10/09 + transferencia` | *hay más de un tramo sin porcentaje: no se sabe cómo repartir el importe* |
+| `Ch 10/09 + transferencia` (en la misma celda) | *hay más de un tramo sin porcentaje: no se sabe cómo repartir el importe* — para eso, poner cada medio en la fila de su factura |
 | `Ch 10/09 60% + transferencia 30%` | *los porcentajes suman 90% en lugar de 100%* |
 | `Ch 10/09 50% + Ch 20/10 50%` | *hay 2 tramos de cheque: escribí uno solo* |
 | Celda vacía | Carga manual |
@@ -938,7 +971,7 @@ retención se descuenta de la transferencia (o del cheque propio si no hay trans
 En todos estos casos el proveedor queda en **Carga manual** con ese texto como motivo: no se
 envía nada y se ve en la pantalla de resultados.
 
-### C.7 Estándar sugerido
+### C.8 Estándar sugerido
 
 La app acepta las variantes de arriba, pero si se usa **una sola forma** los avisos y las
 revisiones son más rápidos. Propuesta:
@@ -953,5 +986,6 @@ revisiones son más rápidos. Propuesta:
 
 Y dos criterios que valen para cualquier estándar que se elija:
 
-- **Todas las filas del mismo proveedor** tienen que decir lo mismo en Forma de pago.
+- Si se usan **porcentajes**, todas las filas del proveedor tienen que decir lo mismo. Sin
+  porcentajes, cada factura puede llevar su propio medio.
 - Los números de cheque a endosar se **copian de Finnegans**, no se tipean.

@@ -153,7 +153,7 @@ def _centavos(valor: Decimal) -> Decimal:
     return valor.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _pesos(valor: Decimal) -> str:
+def pesos(valor: Decimal) -> str:
     return f"$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
@@ -191,16 +191,16 @@ def repartir(
     # mejor a mano.
     if total_endosos > neto:
         raise RepartoError(
-            f"los cheques a endosar suman {_pesos(total_endosos)} y el neto a pagar "
-            f"es {_pesos(neto)}: quedarían {_pesos(total_endosos - neto)} a favor "
+            f"los cheques a endosar suman {pesos(total_endosos)} y el neto a pagar "
+            f"es {pesos(neto)}: quedarían {pesos(total_endosos - neto)} a favor "
             f"del proveedor"
         )
 
     ajustables = [t for t in tramos if not t.es_endoso]
     if not ajustables and total_endosos < neto:
         raise RepartoError(
-            f"los cheques a endosar suman {_pesos(total_endosos)} y el neto a pagar "
-            f"es {_pesos(neto)}: faltan {_pesos(neto - total_endosos)} y no se indicó "
+            f"los cheques a endosar suman {pesos(total_endosos)} y el neto a pagar "
+            f"es {pesos(neto)}: faltan {pesos(neto - total_endosos)} y no se indicó "
             f"con qué se pagan"
         )
 

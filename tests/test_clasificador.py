@@ -28,8 +28,23 @@ class TestClasificar:
         p = _proveedor("transferencia", "transferencia")
         assert clasificar(p).modalidad == Modalidad.TRANSFERENCIA
 
-    def test_mixto_es_manual(self):
+    def test_medios_distintos_por_factura_es_mixto(self):
+        """Un proveedor con varias facturas puede pagar cada una con su medio."""
         p = _proveedor("Ch 08/05", "transferencia")
+        assert clasificar(p).modalidad == Modalidad.MIXTO
+
+    def test_mixto_con_endoso(self):
+        p = _proveedor("Endoso 11139918", "Ch 08/05", "transferencia")
+        assert clasificar(p).modalidad == Modalidad.MIXTO
+
+    def test_fechas_distintas_sigue_siendo_cheque_propio(self):
+        """Mismo medio en todas: no es mixto, es el camino de siempre."""
+        p = _proveedor("Ch 08/05", "Ch 15/07 - 20/07")
+        assert clasificar(p).modalidad == Modalidad.CHEQUE_PROPIO
+
+    def test_mezclar_porcentajes_entre_filas_es_manual(self):
+        """Porcentajes sobre el total + un medio por factura sería ambiguo."""
+        p = _proveedor("Ch 08/05 + transferencia 30%", "transferencia")
         resultado = clasificar(p)
         assert resultado.modalidad == Modalidad.MANUAL
         assert "mixta" in resultado.motivo_manual.lower()

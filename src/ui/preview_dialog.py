@@ -41,8 +41,8 @@ def _fmt(importe: float) -> str:
 
 
 def _etiqueta_modalidad(op: OpPago) -> tuple[str, str]:
-    """Cómo se paga esta OP: en un combinado se nombran los medios que tiene."""
-    if op.proveedor.modalidad != Modalidad.COMBINADO:
+    """Cómo se paga esta OP: si hay varios medios, se nombran los que tiene."""
+    if op.proveedor.modalidad not in (Modalidad.COMBINADO, Modalidad.MIXTO):
         if op.proveedor.modalidad == Modalidad.TRANSFERENCIA:
             return "Transferencia", "info"
         return "Cheque propio", "success"

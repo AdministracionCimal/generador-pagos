@@ -7,7 +7,8 @@ from enum import Enum, auto
 class Modalidad(Enum):
     CHEQUE_PROPIO = auto()
     TRANSFERENCIA = auto()
-    COMBINADO = auto()      # varios medios en la misma «Forma de pago»
+    COMBINADO = auto()      # varios medios en la misma «Forma de pago», por porcentaje
+    MIXTO = auto()          # cada factura con su medio (una por transferencia, otra en cheques)
     MANUAL = auto()
 
 
