@@ -27,6 +27,7 @@ retenciones de Ganancias y hace el alta por API.
 12. [Preguntas frecuentes](#12-preguntas-frecuentes)
 13. [Anexo A — Distribución interna (para el administrador)](#anexo-a--distribución-interna-para-el-administrador)
 14. [Anexo B — Glosario](#anexo-b--glosario)
+15. [Anexo C — Denominaciones que acepta la app](#anexo-c--denominaciones-que-acepta-la-app)
 
 ---
 
@@ -320,6 +321,9 @@ normal y no genera alerta.
 pasó, asume el año siguiente. De ahí el riesgo: hoy 03/08/2026, escribir `Ch 08/05` genera un
 cheque al **08/05/2027**. Un error de tipeo en el día puede mandar el cheque casi un año
 hacia adelante. Por eso existe la alerta naranja en la pantalla previa — **hay que mirarla**.
+
+> La lista completa de todo lo que se puede escribir —y de lo que no— está en el
+> **Anexo C**, que se puede imprimir por separado para acordar un estándar.
 
 **Ojo con la diferencia entre mezclar en la misma celda y mezclar entre filas:**
 
@@ -833,3 +837,121 @@ PyInstaller puede informar éxito sin haber reemplazado el binario.
 | **Cuenta corriente (CtaCte)** | Los documentos que la OP cancela |
 | **ISAR** | Base imponible de la retención de Ganancias |
 | **Fraccionar** | Dividir el importe en varios cheques según las fechas de la forma de pago |
+
+---
+
+## Anexo C — Denominaciones que acepta la app
+
+Referencia completa de lo que se puede escribir en la planilla. Está pensada para acordar un
+estándar: la app tolera varias formas de escribir lo mismo, pero conviene elegir una y usarla
+siempre. **Todo lo de estas tablas está verificado contra el código de la app**, no es una
+descripción aproximada.
+
+### C.1 Encabezados de columna (fila 1 de la hoja `DM`)
+
+| Encabezado | Cómo se reconoce | Obligatorio |
+|---|---|---|
+| `Documento` | Exacto | Sí |
+| `Proveedor` | Exacto | Sí |
+| `Forma de pago` **o** `Pago` | Exacto (cualquiera de los dos) | Sí |
+| `Importe` | Cualquier encabezado que **contenga** “importe” (ej. `Importe ppal`) | Sí |
+| `CUIT` | Exacto | Recomendado |
+| `Comprobante` | Exacto | Recomendado |
+| `Fecha vto` | Cualquier encabezado que **contenga** “fecha vto” | Opcional |
+
+Mayúsculas y tildes son indistintas. `Condición de pago` **no** se reconoce como forma de pago.
+
+### C.2 Cheque propio
+
+| Se escribe | Resultado |
+|---|---|
+| `Ch 15/05` | 1 cheque al 15/05 |
+| `Ch 08/06 - 09/06 - 18/06` | 3 cheques, uno por fecha |
+| `ch15/05` | Igual (sin espacio) |
+| `Ch. 15/05` | Igual (con punto) |
+| `CHQ 15/05` | Igual (abreviatura) |
+| `Cheque 15/05` | Igual (palabra completa) |
+| `cheques 15/05` | Igual (plural) |
+| `Cheque diferido 15/05` | Igual (admite palabras intercaladas) |
+| `Ch 30 dias` | 1 cheque, con la fecha de la columna `Fecha vto` |
+
+Las fechas van **`dd/mm` sin año**: la app usa el año en curso, y si la fecha ya pasó asume el
+año siguiente.
+
+### C.3 Transferencia
+
+| Se escribe | Resultado |
+|---|---|
+| `transferencia` | 1 transferencia por el neto |
+| `Transferencia` / `TRANSFERENCIA` | Igual (mayúsculas indistintas) |
+| `transf` / `transf.` | Igual |
+| `transferencia interbancaria` | Igual |
+| `transferencia bancaria` | Igual |
+| `Transferencia inmediata` | Igual |
+| `transf bancaria` | Igual |
+| `tranferencia` / `transferensia` | Igual, y **avisa del error de ortografía** |
+
+### C.4 Endoso de cheques de terceros
+
+| Se escribe | Resultado |
+|---|---|
+| `Endoso 11139918` | Endosa ese cheque de cartera |
+| `Endosos 11139918 - 03744630` | Endosa los dos |
+| `End 11139918` | Igual (abreviatura) |
+| `endoso` / `ENDOSO` | Igual (mayúsculas indistintas) |
+
+El número se puede escribir **con o sin los ceros de la izquierda** (`00017` o `17`), y sirve
+tanto el número del cheque como el número electrónico. **Un endoso solo tiene que cubrir el
+total exacto**; si sobra o falta, el proveedor va a Carga manual con la diferencia.
+
+### C.5 Combinaciones (varios medios en la misma celda, separados por `+`)
+
+| Se escribe | Resultado |
+|---|---|
+| `Ch 10/09 + transferencia 30%` | 30% por transferencia, el resto en 1 cheque |
+| `Ch 10/09 - 20/09 70% + transferencia 30%` | 30% por transferencia, el 70% en 2 cheques |
+| `transferencia 33,5% + Ch 10/09` | Admite decimales con coma, y cualquier orden |
+| `Ch 10/09 + transferencia 30 %` | Admite espacio antes del `%` |
+| `Endoso 11139918 + Ch 10/09` | Endoso + 1 cheque por la diferencia |
+| `Endoso 11139918 + transferencia` | Endoso + transferencia por la diferencia |
+| `Endoso 11139918 - 03744630 + Ch 10/09` | Dos endosos + 1 cheque |
+
+Reglas: **un solo tramo de cada tipo**; el tramo **sin** porcentaje se queda con el resto; si
+todos llevan porcentaje deben **sumar 100%**; los endosos van por el nominal del cheque y la
+retención se descuenta de la transferencia (o del cheque propio si no hay transferencia).
+
+### C.6 Lo que NO se acepta, y qué dice la app
+
+| Se escribe | Mensaje |
+|---|---|
+| `Cheque` / `Ch` (sin número ni fecha) | *no se reconoció ninguna forma de pago* |
+| `chequera 12` | *no se reconoció ninguna forma de pago* |
+| `echeq 15/05` / `e-cheq 15/05` | *no se reconoció ninguna forma de pago* (es otro instrumento) |
+| `trans` | *no se reconoció ninguna forma de pago* (muy corto para asumir) |
+| `efectivo` / `mercado pago` / `Tarjeta de Crédito` | *no se reconoció ninguna forma de pago* |
+| `cheque o transferencia` | *no se reconoció ninguna forma de pago* (ambiguo: no se adivina) |
+| `Ch 10/09 + transferencia` | *hay más de un tramo sin porcentaje: no se sabe cómo repartir el importe* |
+| `Ch 10/09 60% + transferencia 30%` | *los porcentajes suman 90% en lugar de 100%* |
+| `Ch 10/09 50% + Ch 20/10 50%` | *hay 2 tramos de cheque: escribí uno solo* |
+| Celda vacía | Carga manual |
+
+En todos estos casos el proveedor queda en **Carga manual** con ese texto como motivo: no se
+envía nada y se ve en la pantalla de resultados.
+
+### C.7 Estándar sugerido
+
+La app acepta las variantes de arriba, pero si se usa **una sola forma** los avisos y las
+revisiones son más rápidos. Propuesta:
+
+| Caso | Forma sugerida |
+|---|---|
+| Cheque propio | `Ch dd/mm` — varias fechas separadas por ` - ` |
+| Transferencia | `transferencia` (a secas) |
+| Endoso | `Endoso <número>` — varios separados por ` - ` |
+| Endoso + resto en cheque | `Endoso <número> + Ch dd/mm` |
+| Parte transferencia, resto cheque | `Ch dd/mm + transferencia NN%` |
+
+Y dos criterios que valen para cualquier estándar que se elija:
+
+- **Todas las filas del mismo proveedor** tienen que decir lo mismo en Forma de pago.
+- Los números de cheque a endosar se **copian de Finnegans**, no se tipean.
