@@ -458,4 +458,4 @@ Objetivo: pagar un proveedor combinando medios en la misma celda de «Forma de p
 | 2b | Fechas inexistentes (`Ch 31/02`): generan su cheque marcado en vez de desaparecer; alerta naranja editable y **bloqueo del envío** mientras quede una alerta (regla movida a `domain/alertas_cheque.py`); check para confirmar plazos de más de 180 días | ✅ hecho |
 | 3 | Tolerancia en «Forma de pago»: `Cheque 15/05`, `transferencia bancaria`, `Transferencia inmediata` ya no caen en MANUAL; texto ambiguo sí | ✅ hecho |
 | 4 | Distribución: versión visible, actualización desde la app (descarga verificada + swap del .exe), tests en el CI | ✅ hecho |
-| — | Firma de código (elimina SmartScreen y falsos positivos de antivirus) | ⏸ requiere comprar certificado |
+| — | Firma de código (elimina SmartScreen y falsos positivos de antivirus) | ❌ descartada por el usuario: es distribución interna, no vale el certificado |

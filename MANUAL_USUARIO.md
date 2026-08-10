@@ -75,7 +75,9 @@ versión disponible y un botón **Sí** para actualizar en el momento:
 
 1. Descarga el archivo nuevo y **verifica que sea el del release** (comparación de huella
    sha256). Si no coincide, no toca nada.
-2. Guarda tu versión actual como `GeneradorDePagos.anterior.exe`, por si hiciera falta volver.
+2. Guarda tu versión actual al lado del programa, agregándole `.anterior` al nombre (si el
+   programa se llama `Generador De Pagos.exe`, la copia queda como
+   `Generador De Pagos.anterior.exe`), por si hiciera falta volver.
 3. Cierra la app y la vuelve a abrir con la versión nueva.
 
 No hay que entrar al repositorio, ni bajar nada del navegador, ni aceptar SmartScreen otra vez
@@ -673,7 +675,7 @@ Y en la carpeta donde está el `.exe`, después de la primera actualización:
 
 | Archivo | Contenido |
 |---|---|
-| `GeneradorDePagos.anterior.exe` | La versión que había antes de actualizar. Se puede borrar; sirve para volver atrás si la nueva diera problemas |
+| El programa con `.anterior` en el nombre (ej. `Generador De Pagos.anterior.exe`) | La versión que había antes de actualizar. Se puede borrar; sirve para volver atrás si la nueva diera problemas |
 
 El `audit_log.jsonl` es lo primero que hay que mandar cuando se reporta un problema: tiene el
 detalle exacto de cada OP enviada y la respuesta del sistema.
