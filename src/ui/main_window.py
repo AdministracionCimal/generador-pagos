@@ -24,7 +24,12 @@ from src.domain.alertas_cheque import cheques_en_alerta
 from src.domain.bancos import mapa_por_nombre
 from src.domain.cartera import leer_cartera, validar_una_empresa
 from src.domain.clasificador import clasificar
-from src.domain.documento import es_fc, es_pago, normalizar as normalizar_doc
+from src.domain.documento import (
+    es_fc,
+    es_pago,
+    claves_pendientes,
+    figura_con_saldo,
+)
 from src.domain.empresa import codigo_limpio as empresa_codigo_limpio
 from src.domain.forma_pago import (
     ENDOSO,
@@ -387,12 +392,7 @@ class _PrecargarWorker(QThread):
             def _fetch_saldo(cuit: str) -> tuple[str, "set | None"]:
                 try:
                     rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
-                    return cuit, {
-                        normalizar_doc(r["IDENTIFICACIONEXTERNA"])
-                        for r in rows
-                        if r.get("IDENTIFICACIONEXTERNA")
-                        and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
-                    }
+                    return cuit, claves_pendientes(rows)
                 except Exception:
                     return cuit, None
 
@@ -473,12 +473,7 @@ class _SaldoCheckerWorker(QThread):
             def _fetch(cuit: str) -> tuple[str, "set | None"]:
                 try:
                     rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
-                    return cuit, {
-                        normalizar_doc(r["IDENTIFICACIONEXTERNA"])
-                        for r in rows
-                        if r.get("IDENTIFICACIONEXTERNA")
-                        and float(r.get("IMPORTEMONTRAN", 0) or 0) != 0
-                    }
+                    return cuit, claves_pendientes(rows)
                 except Exception:
                     return cuit, None
 
@@ -977,7 +972,8 @@ class MainWindow(QMainWindow):
             if (p.cuit
                     and docs_pendientes.get(p.cuit) is not None
                     and p.items
-                    and all(normalizar_doc(i.documento) not in docs_pendientes[p.cuit]
+                    and all(not figura_con_saldo(docs_pendientes[p.cuit],
+                                                 i.documento, i.comprobante)
                             for i in p.items)):
                 removidos.append(p.nombre)
             else:
@@ -1577,12 +1573,12 @@ class MainWindow(QMainWindow):
             if pendientes is not None:
                 items_sin_saldo = [
                     i for i in p.items
-                    if normalizar_doc(i.documento) not in pendientes
+                    if not figura_con_saldo(pendientes, i.documento, i.comprobante)
                     and not es_pago(i.documento)
                 ]
                 items_base = [
                     i for i in p.items
-                    if normalizar_doc(i.documento) in pendientes
+                    if figura_con_saldo(pendientes, i.documento, i.comprobante)
                     or es_pago(i.documento)
                 ]
                 for item in items_sin_saldo:
@@ -1873,7 +1869,7 @@ class MainWindow(QMainWindow):
                 continue  # fail-open: no cambiar estado
             sin_saldo = [
                 i for i in prov.items
-                if normalizar_doc(i.documento) not in pendientes
+                if not figura_con_saldo(pendientes, i.documento, i.comprobante)
             ]
             if sin_saldo and len(sin_saldo) == len(prov.items):
                 label, variant = _ESTADOS["YA_PAGADA"]

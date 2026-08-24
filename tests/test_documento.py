@@ -44,3 +44,76 @@ class TestTipoDeDocumento:
     def test_tiene_prefijo_requiere_numero(self):
         assert not tiene_prefijo("FC", "FC")
         assert tiene_prefijo("FC - 1", "FC")
+
+
+# ── cruce contra composicionSaldoProveedor ────────────────────────────────────
+
+from src.domain.documento import claves_de_fila, claves_pendientes, figura_con_saldo
+
+# Fila real: factura cargada por Finnegans (IDENTIFICACIONEXTERNA == DOCUMENTO).
+FILA_CLASICA = {
+    "DOCUMENTO": "FC - 22118",
+    "IDENTIFICACIONEXTERNA": "FC - 22118",
+    "COMPROBANTE": "A-0016-00030187",
+    "IMPORTEMONTRAN": -707502.73,
+}
+
+# Fila real: factura cargada por el otro sistema, que graba
+# <CUIT>-<LETRA>-<PTOVTA>-<NUMERO> en IDENTIFICACIONEXTERNA.
+FILA_EXTERNA = {
+    "DOCUMENTO": "FC - 22219",
+    "IDENTIFICACIONEXTERNA": "20313144411-A-0002-00000196",
+    "COMPROBANTE": "A-0002-00000196",
+    "IMPORTEMONTRAN": -2904000.0,
+}
+
+
+class TestClavesDeSaldo:
+    def test_indexa_las_tres_formas_de_nombrar_la_factura(self):
+        assert claves_de_fila(FILA_EXTERNA) == {
+            normalizar("FC - 22219"),
+            normalizar("20313144411-A-0002-00000196"),
+            normalizar("A-0002-00000196"),
+        }
+
+    def test_ignora_los_campos_vacios(self):
+        fila = {**FILA_CLASICA, "IDENTIFICACIONEXTERNA": "", "COMPROBANTE": None}
+        assert claves_de_fila(fila) == {normalizar("FC - 22118")}
+
+    def test_las_filas_sin_saldo_no_entran(self):
+        saldada = {**FILA_CLASICA, "IMPORTEMONTRAN": 0}
+        assert claves_pendientes([saldada]) == set()
+
+    def test_importe_no_numerico_no_rompe(self):
+        assert claves_pendientes([{**FILA_CLASICA, "IMPORTEMONTRAN": "s/d"}]) == set()
+
+
+class TestFiguraConSaldo:
+    def test_factura_clasica_por_documento(self):
+        pend = claves_pendientes([FILA_CLASICA])
+        assert figura_con_saldo(pend, "FC - 22118", "A-0016-00030187")
+
+    def test_factura_del_otro_sistema_matchea_igual(self):
+        """Antes se omitía del pago: su IDENTIFICACIONEXTERNA no coincide con nada
+        del Excel, y el cruce se hacía sólo contra ese campo."""
+        pend = claves_pendientes([FILA_EXTERNA])
+        assert figura_con_saldo(pend, "FC - 22219", "A-0002-00000196")
+
+    def test_alcanza_con_el_documento_aunque_el_excel_no_traiga_comprobante(self):
+        pend = claves_pendientes([FILA_EXTERNA])
+        assert figura_con_saldo(pend, "FC - 22219", "")
+
+    def test_alcanza_con_el_comprobante_si_el_documento_no_pega(self):
+        pend = claves_pendientes([FILA_EXTERNA])
+        assert figura_con_saldo(pend, "20313144411-A-0002-00000196", "")
+
+    def test_tolera_el_espaciado_del_guion(self):
+        pend = claves_pendientes([FILA_CLASICA])
+        assert figura_con_saldo(pend, " fc -22118 ", "")
+
+    def test_una_factura_ajena_no_matchea(self):
+        pend = claves_pendientes([FILA_EXTERNA])
+        assert not figura_con_saldo(pend, "FC - 99999", "A-0002-00099999")
+
+    def test_sin_pendientes_no_matchea_nada(self):
+        assert not figura_con_saldo(set(), "FC - 22219", "A-0002-00000196")
