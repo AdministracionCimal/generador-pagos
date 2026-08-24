@@ -73,6 +73,30 @@ def _clave_proveedor(p) -> tuple[str, str]:
     return (p.cuit or "", p.nombre)
 
 
+def componer_avisos(
+    advertencias: list[str], sin_verificar: list[str]
+) -> tuple[str, str] | None:
+    """`(título, cuerpo)` del diálogo previo al envío, o `None` si no hay nada.
+
+    `sin_verificar` son los proveedores cuyo saldo no se pudo consultar. El pago
+    no se bloquea (un timeout del ERP no debería frenar la tanda), pero el aviso
+    no es opcional: sin ese control se paga a ciegas lo que diga el Excel, que es
+    justo lo que la verificación existe para evitar.
+    """
+    avisos = list(advertencias)
+    if sin_verificar:
+        avisos.append(
+            "⚠ No se pudo consultar el saldo en Finnegans de: "
+            + ", ".join(sin_verificar)
+            + ".\n   Se va a pagar lo que dice el Excel, sin la "
+            "verificación contra el ERP. Revisá que esté actualizado."
+        )
+    if not avisos:
+        return None
+    titulo = "Advertencias" if sin_verificar else "Proveedores omitidos"
+    return titulo, "\n".join(avisos)
+
+
 def proveedores_pendientes(proveedores: list, ops: list, resultados: list) -> list:
     """Proveedores que quedan por enviar: saca los que ya tienen OP registrada OK.
 
@@ -1374,9 +1398,12 @@ class MainWindow(QMainWindow):
         self._manejar_overflow(cotizacion_dolar, ret_cache, ratios_fc)
         self._asignar_numeros_op(ultimo_op)
 
-        if getattr(self, "_ops_advertencias", []):
-            cuerpo = "\n".join(self._ops_advertencias)
-            QMessageBox.warning(self, "Proveedores omitidos", cuerpo)
+        aviso = componer_avisos(
+            getattr(self, "_ops_advertencias", []),
+            getattr(self, "_ops_sin_verificar", []),
+        )
+        if aviso is not None:
+            QMessageBox.warning(self, aviso[0], aviso[1])
 
         if not self._ops_a_procesar:
             QMessageBox.information(self, "Nada que procesar",
@@ -1552,6 +1579,9 @@ class MainWindow(QMainWindow):
         mapa_bancos = mapa_bancos or {}
         self._ops_a_procesar = []
         self._ops_advertencias: list[str] = []
+        # Proveedores cuyo saldo no se pudo consultar: se pagan igual, pero sin
+        # el control contra Finnegans. Hay que decirlo, no dejarlo pasar.
+        self._ops_sin_verificar: list[str] = []
         self._proveedores_overflow: list = []   # proveedores que exceden el límite
         numero_desde = ultimo + 1
         chequera = self._combo_cheq.currentData() or self._combo_cheq.currentText().strip()
@@ -1570,6 +1600,11 @@ class MainWindow(QMainWindow):
             # de saldo porque ya están aplicados en Finnegans, pero deben estar
             # en el POST para descontar del total.
             pendientes = docs_pendientes.get(p.cuit) if p.cuit else None
+            if pendientes is None and p.cuit:
+                # `None` = la consulta a composicionSaldoProveedor falló. El pago
+                # sigue (fail-open: no bloqueamos por un timeout del ERP), pero
+                # sin la doble verificación, así que se avisa antes de enviar.
+                self._ops_sin_verificar.append(p.nombre)
             if pendientes is not None:
                 items_sin_saldo = [
                     i for i in p.items

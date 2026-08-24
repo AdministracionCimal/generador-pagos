@@ -10,6 +10,7 @@ from PyQt6.QtCore import QCoreApplication
 from src.domain.models import ItemFactura, OpPago, ProveedorTanda
 from src.ui.main_window import (
     _ProcesarWorker,
+    componer_avisos,
     numero_cheque_desfasado,
     proveedores_pendientes,
 )
@@ -128,3 +129,39 @@ class TestProcesarWorkerCorteDeRed:
 
         assert res["estado"] == "OK"
         assert res["numero_real"] == "OP-0004-00022013"
+
+
+class TestComponerAvisos:
+    """El control de saldos es fail-open: si la consulta al ERP falla el pago sigue.
+
+    Que siga no puede significar que nadie se entere — sin ese control se paga lo
+    que diga el Excel, que es exactamente contra lo que protege.
+    """
+
+    def test_sin_nada_que_decir_no_abre_dialogo(self):
+        assert componer_avisos([], []) is None
+
+    def test_solo_omisiones_mantiene_el_titulo_de_siempre(self):
+        titulo, cuerpo = componer_avisos(["• A: CUIT inválido — se omite."], [])
+        assert titulo == "Proveedores omitidos"
+        assert "CUIT" in cuerpo
+
+    def test_saldo_no_verificado_avisa_y_cambia_el_titulo(self):
+        titulo, cuerpo = componer_avisos([], ["ACME SA"])
+        assert titulo == "Advertencias"
+        assert "ACME SA" in cuerpo
+        assert "no se pudo consultar el saldo" in cuerpo.lower()
+
+    def test_nombra_a_todos_los_proveedores_afectados(self):
+        _, cuerpo = componer_avisos([], ["ACME SA", "B. A. SANI SA"])
+        assert "ACME SA" in cuerpo and "B. A. SANI SA" in cuerpo
+
+    def test_convive_con_las_omisiones(self):
+        titulo, cuerpo = componer_avisos(["• A: importe total es $0."], ["ACME SA"])
+        assert titulo == "Advertencias"
+        assert "importe total" in cuerpo
+        assert "ACME SA" in cuerpo
+
+    def test_dice_que_se_paga_segun_el_excel(self):
+        _, cuerpo = componer_avisos([], ["ACME SA"])
+        assert "Excel" in cuerpo
