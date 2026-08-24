@@ -127,11 +127,17 @@ class FinnegansClient:
             raise ApiError(resp.status_code, resp.text[:200])
         return self._parse_response(resp)
 
-    def get_composicion_saldo_proveedor(self, cuit: str, fecha: str) -> list[dict]:
+    def get_composicion_saldo_proveedor(
+        self, cuit: str, fecha: str, empresa: str = ""
+    ) -> list[dict]:
+        """`empresa` es el código de negocio limpio («EMPRE01»). Sin él el
+        reporte mezcla las sociedades del grupo — ver `endpoints`."""
         if self._token is None or time.time() >= self._token_expires_at:
             self._fetch_token()
         resp = httpx.get(
-            self.endpoints.composicion_saldo_proveedor(cuit, fecha, self._token),
+            self.endpoints.composicion_saldo_proveedor(
+                cuit, fecha, self._token, empresa
+            ),
             timeout=20,
         )
         if resp.status_code != 200:

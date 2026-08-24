@@ -30,6 +30,7 @@ from src.domain.documento import (
     aplicacion_para,
     claves_pendientes,
     figura_con_saldo,
+    filtro_de_empresa_aplicado,
     id_externa,
 )
 from src.domain.empresa import codigo_limpio as empresa_codigo_limpio
@@ -424,11 +425,18 @@ class _PrecargarWorker(QThread):
             docs_pendientes = {}
             cuits_a_verificar = sorted({p.cuit for p in self._proveedores if p.cuit})
             fecha_hoy = date.today().strftime("%Y-%m-%d")
+            empresa_saldo = empresa_codigo_limpio(cfg.get("empresa_codigo", ""))
             n_cuits = len(cuits_a_verificar)
 
             def _fetch_saldo(cuit: str) -> tuple[str, "set | None"]:
                 try:
-                    rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
+                    rows = client.get_composicion_saldo_proveedor(
+                        cuit, fecha_hoy, empresa_saldo
+                    )
+                    if not filtro_de_empresa_aplicado(rows):
+                        # Volvió mezclado: el saldo incluye otras sociedades del
+                        # grupo y no sirve de control. Se avisa como no verificado.
+                        return cuit, None
                     return cuit, claves_pendientes(rows)
                 except Exception:
                     return cuit, None
@@ -504,12 +512,21 @@ class _SaldoCheckerWorker(QThread):
             )
             cuits = sorted({p.cuit for p in self._proveedores if p.cuit})
             fecha_hoy = date.today().strftime("%Y-%m-%d")
+            empresa_saldo = empresa_codigo_limpio(
+                self._cfg.get("empresa_codigo", "")
+            )
             docs_pendientes: dict = {}
             total = len(cuits)
 
             def _fetch(cuit: str) -> tuple[str, "set | None"]:
                 try:
-                    rows = client.get_composicion_saldo_proveedor(cuit, fecha_hoy)
+                    rows = client.get_composicion_saldo_proveedor(
+                        cuit, fecha_hoy, empresa_saldo
+                    )
+                    if not filtro_de_empresa_aplicado(rows):
+                        # Volvió mezclado: el saldo incluye otras sociedades del
+                        # grupo y no sirve de control. Se avisa como no verificado.
+                        return cuit, None
                     return cuit, claves_pendientes(rows)
                 except Exception:
                     return cuit, None

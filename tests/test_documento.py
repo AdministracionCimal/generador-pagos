@@ -48,8 +48,11 @@ class TestTipoDeDocumento:
 
 # ── cruce contra composicionSaldoProveedor ────────────────────────────────────
 
+from src.api.endpoints import Endpoints
 from src.domain.documento import (
     aplicacion_para,
+    empresas_de,
+    filtro_de_empresa_aplicado,
     claves_de_fila,
     claves_pendientes,
     figura_con_saldo,
@@ -244,3 +247,55 @@ class TestAplicacionPara:
         fila = {**FILA_CLASICA, "IDENTIFICACIONEXTERNA": ""}
         pend = claves_pendientes([fila])
         assert aplicacion_para(pend, "FC - 22118", "") == "FC - 22118"
+
+
+class TestFiltroDeEmpresa:
+    """`composicionSaldoProveedor` consulta por CUIT y mezcla todo el grupo.
+
+    Sin filtrar, el saldo de un proveedor incluye documentos de RTC, SEN, PER y
+    la empresa de pruebas. El filtro se hace en el servidor y puede no tomar sin
+    avisar, así que hay que verificar que se haya aplicado.
+    """
+
+    def _fila(self, empresa):
+        return {**FILA_CLASICA, "EMPRESA": empresa}
+
+    def test_una_sola_empresa_pasa(self):
+        filas = [self._fila("CIMALCO NEUQUEN S.A.")] * 2
+        assert filtro_de_empresa_aplicado(filas)
+
+    def test_varias_empresas_significa_que_no_se_aplico(self):
+        filas = [self._fila("CIMALCO NEUQUEN S.A."), self._fila("PRUEBA")]
+        assert not filtro_de_empresa_aplicado(filas)
+
+    def test_respuesta_vacia_pasa(self):
+        # Cero filas = el proveedor no tiene saldo. No es un fallo del filtro.
+        assert filtro_de_empresa_aplicado([])
+
+    def test_ignora_el_campo_vacio(self):
+        filas = [self._fila("CIMALCO NEUQUEN S.A."), self._fila("")]
+        assert filtro_de_empresa_aplicado(filas)
+        assert empresas_de(filas) == {"CIMALCO NEUQUEN S.A."}
+
+
+class TestUrlDelSaldo:
+    EP = Endpoints("https://api.finneg.com/api")
+
+    def test_sin_empresa_no_manda_el_parametro(self):
+        url = self.EP.composicion_saldo_proveedor("20313144411", "2026-08-24", "tok")
+        assert "PARAMWEBREPORT_Empresa" not in url
+
+    def test_con_empresa_lo_manda_con_e_mayuscula(self):
+        # En minúscula Finnegans lo ignora en silencio y devuelve todo el grupo.
+        url = self.EP.composicion_saldo_proveedor(
+            "20313144411", "2026-08-24", "tok", "EMPRE01"
+        )
+        assert "&PARAMWEBREPORT_Empresa=EMPRE01" in url
+
+    def test_mantiene_los_parametros_de_siempre(self):
+        url = self.EP.composicion_saldo_proveedor(
+            "20313144411", "2026-08-24", "tok", "EMPRE01"
+        )
+        assert "PARAMWEBREPORT_fecha=2026-08-24" in url
+        assert "PARAMWEBREPORT_organizacion=20313144411" in url
+        assert "PARAMWEBREPORT_cuenta=02.01.01.01.0001" in url

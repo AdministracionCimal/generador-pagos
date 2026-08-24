@@ -92,12 +92,28 @@ class Endpoints:
             url += f"&PARAMWEBREPORT_Empresa={quote(empresa, safe='')}"
         return url
 
-    def composicion_saldo_proveedor(self, cuit: str, fecha: str, token: str) -> str:
+    def composicion_saldo_proveedor(
+        self, cuit: str, fecha: str, token: str, empresa: str = ""
+    ) -> str:
+        """Documentos con saldo del proveedor.
+
+        Sin `empresa` el reporte **mezcla todo el grupo**: consulta por CUIT y
+        devuelve también lo de RTC, SEN, PER y la empresa de pruebas.
+
+        Dos trampas, las mismas que `ApiSituacionCheques`:
+        - el parámetro va con `E` mayúscula (`PARAMWEBREPORT_Empresa`); en
+          minúscula se **ignora en silencio** y vuelve sin filtrar;
+        - hay que mandar el código de negocio limpio (`EMPRE01`): con el ID
+          interno (`EMPRESA_EMPRE01`) responde 200 con cero filas.
+        """
         from urllib.parse import quote
-        return (
+        url = (
             f"{self.base}/reports/composicionSaldoProveedor"
             f"?ACCESS_TOKEN={token}"
             f"&PARAMWEBREPORT_fecha={fecha}"
             f"&PARAMWEBREPORT_organizacion={quote(cuit, safe='')}"
             f"&PARAMWEBREPORT_cuenta=02.01.01.01.0001"
         )
+        if empresa:
+            url += f"&PARAMWEBREPORT_Empresa={quote(empresa, safe='')}"
+        return url

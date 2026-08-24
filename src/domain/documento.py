@@ -103,6 +103,22 @@ def claves_de_fila(fila: dict) -> set[str]:
     }
 
 
+def empresas_de(filas: list[dict]) -> set[str]:
+    """Empresas presentes en la respuesta de `composicionSaldoProveedor`."""
+    return {str(f.get("EMPRESA") or "").strip() for f in filas} - {""}
+
+
+def filtro_de_empresa_aplicado(filas: list[dict]) -> bool:
+    """False si el reporte volvió con documentos de varias sociedades.
+
+    El filtro se hace en el servidor y puede no tomar sin avisar (el parámetro
+    en minúscula se ignora en silencio). Si eso pasa, el saldo que se está
+    verificando incluye documentos de otras empresas del grupo y no sirve como
+    control: mejor tratarlo como «no se pudo verificar» que confiar en él.
+    """
+    return len(empresas_de(filas)) <= 1
+
+
 def claves_pendientes(filas: list[dict]) -> dict[str, str]:
     """`{clave normalizada: IdentificacionExterna}` de lo que tiene saldo.
 
