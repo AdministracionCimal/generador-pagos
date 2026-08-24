@@ -467,11 +467,14 @@ Acá pueden aparecer, en este orden:
 
 1. **Cotización del dólar no disponible** → se puede continuar (usa $1) o cancelar.
 2. **Último número de cheque distinto** → el número del sistema no coincide con el del campo
-   ÚLTIMO Nº; hay que elegir con cuál emitir.
+   ÚLTIMO Nº; hay que elegir con cuál emitir. Si en cambio no se pudo leer el talonario,
+   aparece **No se pudo verificar el último cheque**: se puede seguir, pero sin esa
+   comprobación (ver la tabla de la sección 4).
 3. **Chequera insuficiente** → elegir otra chequera para los proveedores que no entraron, o
    omitirlos.
 4. **Proveedores omitidos** → lista de lo que quedó afuera y por qué (CUIT inválido, sin
-   saldo, importe cero, sin chequera).
+   saldo, importe cero, sin chequera). Si además hubo algún proveedor cuyo saldo no se pudo
+   consultar, el cartel se titula **Advertencias** y lo incluye al final.
 
 ### Paso 5 — Verificación previa (la pantalla más importante)
 
@@ -564,8 +567,10 @@ La app envía las OPs **una por una** (así Finnegans numera correlativo) y mues
 | **Chequera insuficiente** | Faltan números en la chequera | Asignar otra chequera u omitir esos proveedores |
 | **Sin chequeras disponibles** | No hay otra chequera cargada | Cargar chequeras y volver a intentar |
 | **Proveedores omitidos** | CUIT inválido, sin saldo, importe cero | Revisar cada caso; esos pagos **no se enviaron** |
+| **Advertencias** | Igual que «Proveedores omitidos», más los proveedores cuyo saldo no se pudo consultar en Finnegans | Esos pagos **sí se envían**, pero sin la verificación contra el sistema: se paga lo que dice el Excel. Conviene revisar que el archivo esté actualizado |
 | **Nada que procesar** | Ningún pago quedó en estado Listo | Revisar estados en la tabla |
 | **Último número de cheque distinto** | Finnegans informa otro último cheque emitido que el del campo ÚLTIMO Nº | **Sí** = emitir desde el número de Finnegans (elegir esto si otra persona usó la chequera). **No** = seguir con el de la app (correcto si se saltearon cheques anulados a propósito). **Cancelar** = revisar antes de procesar |
+| **No se pudo verificar el último cheque** | Falló la consulta del talonario en Finnegans | No se puede comprobar si otra persona emitió con esa chequera. **Sí** = emitir igual desde el número de la app (riesgo de cheques repetidos). **Cancelar** = revisar antes de emitir |
 | **Cheques con la fecha en alerta** (banner naranja) | Fecha del Excel inexistente, cheque a hoy o antes, o a más de 180 días | Corregir la fecha en la columna Vencimiento (o tildar el check si el plazo largo es correcto). Hasta que no quede ninguna, el botón de enviar está deshabilitado |
 | **Hay cheques con la fecha en alerta** (cartel rojo, “No se envió nada”) | Se intentó enviar con alertas pendientes | Es la segunda barrera de la app: lista proveedor, número de cheque y motivo. Volver a Procesar y corregir en la pantalla previa |
 | **No se pudo cargar chequeras** | Sin conexión o credenciales inválidas | Probar conexión en Configuración |

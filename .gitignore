@@ -29,3 +29,4 @@ graphify-out/
 # en la app: Configuración → Probar conexión).
 debug_api.py
 
+MANUAL_USUARIO.docx
