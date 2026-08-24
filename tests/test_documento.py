@@ -117,3 +117,55 @@ class TestFiguraConSaldo:
 
     def test_sin_pendientes_no_matchea_nada(self):
         assert not figura_con_saldo(set(), "FC - 22219", "A-0002-00000196")
+
+
+class TestIdentificacionExternaConCuit:
+    """El CUIT de `IdentificacionExterna` puede venir puntuado de varias formas.
+
+    Las tres son el mismo comprobante. Depender de que el sistema que carga las
+    facturas lo mande siempre igual es apoyar el cruce en una convención que
+    nadie valida: si un día sale con guiones, la factura se omite del pago.
+    """
+
+    CANON = "20313144411-A-0002-00000196"
+
+    def test_sin_puntuacion_queda_igual(self):
+        assert normalizar(self.CANON) == self.CANON
+
+    def test_cuit_con_guiones(self):
+        assert normalizar("20-31314441-1-A-0002-00000196") == self.CANON
+
+    def test_cuit_con_puntos(self):
+        assert normalizar("20.31314441.1-A-0002-00000196") == self.CANON
+
+    def test_letra_en_minuscula(self):
+        assert normalizar("20313144411-a-0002-00000196") == self.CANON
+
+    def test_no_toca_los_documentos_normales(self):
+        assert normalizar("FC - 21562") == "FC - 21562"
+        assert normalizar("FC-21562") == "FC - 21562"
+        assert es_fc("FC-21562")
+
+    def test_no_confunde_algo_que_solo_se_parece(self):
+        # Menos dígitos de los que lleva un CUIT: no es una identificación externa.
+        assert normalizar("2031-A-0002-00000196") != self.CANON
+
+    def test_cruza_aunque_cada_lado_lo_escriba_distinto(self):
+        fila = {
+            "DOCUMENTO": "",
+            "IDENTIFICACIONEXTERNA": "20-31314441-1-A-0002-00000196",
+            "COMPROBANTE": "",
+            "IMPORTEMONTRAN": -2904000.0,
+        }
+        assert figura_con_saldo(claves_pendientes([fila]), self.CANON)
+
+    def test_y_tambien_al_reves(self):
+        fila = {
+            "DOCUMENTO": "",
+            "IDENTIFICACIONEXTERNA": self.CANON,
+            "COMPROBANTE": "",
+            "IMPORTEMONTRAN": -1.0,
+        }
+        assert figura_con_saldo(
+            claves_pendientes([fila]), "20-31314441-1-A-0002-00000196"
+        )

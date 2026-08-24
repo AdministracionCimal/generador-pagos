@@ -14,10 +14,32 @@ import re
 
 _RE_PREFIJO = re.compile(r"^([A-Z]+)\s*-\s*(.*)$")
 
+# Identificación externa que graba el sistema que carga facturas:
+# `<CUIT>-<LETRA>-<PTO VENTA>-<NÚMERO>`. El CUIT puede venir con guiones, con
+# puntos o pelado según quién lo escriba, y las tres formas son el mismo
+# comprobante. Se canoniza a 11 dígitos para no depender de eso: pedirle al otro
+# sistema que lo mande siempre igual sería apoyar el cruce en una convención que
+# nadie valida.
+_RE_ID_EXTERNA = re.compile(
+    r"^(\d{2})[-.\s]?(\d{8})[-.\s]?(\d)-([A-Z])-(\d{4})-(\d{8})$"
+)
+
+
+def _canonizar_id_externa(texto: str) -> str | None:
+    """`«20-31314441-1-A-0002-00000196»` → `«20313144411-A-0002-00000196»`."""
+    match = _RE_ID_EXTERNA.match(texto)
+    if match is None:
+        return None
+    cuit = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+    return f"{cuit}-{match.group(4)}-{match.group(5)}-{match.group(6)}"
+
 
 def normalizar(documento: str) -> str:
     """Forma canónica para comparar: `" fc -21562 "` → `"FC - 21562"`."""
     texto = " ".join(str(documento or "").split()).upper()
+    externa = _canonizar_id_externa(texto)
+    if externa is not None:
+        return externa
     match = _RE_PREFIJO.match(texto)
     if not match:
         return texto
