@@ -49,6 +49,7 @@ class TestTipoDeDocumento:
 # ── cruce contra composicionSaldoProveedor ────────────────────────────────────
 
 from src.domain.documento import (
+    aplicacion_para,
     claves_de_fila,
     claves_pendientes,
     figura_con_saldo,
@@ -87,10 +88,10 @@ class TestClavesDeSaldo:
 
     def test_las_filas_sin_saldo_no_entran(self):
         saldada = {**FILA_CLASICA, "IMPORTEMONTRAN": 0}
-        assert claves_pendientes([saldada]) == set()
+        assert claves_pendientes([saldada]) == {}
 
     def test_importe_no_numerico_no_rompe(self):
-        assert claves_pendientes([{**FILA_CLASICA, "IMPORTEMONTRAN": "s/d"}]) == set()
+        assert claves_pendientes([{**FILA_CLASICA, "IMPORTEMONTRAN": "s/d"}]) == {}
 
 
 class TestFiguraConSaldo:
@@ -204,3 +205,42 @@ class TestIdExterna:
         assert normalizar(id_externa("20-31314441-1", "A-0002-00000196")) == (
             "20313144411-A-0002-00000196"
         )
+
+
+class TestAplicacionPara:
+    """`AplicacionOrigen` resuelve por IdentificacionExterna, no por el documento.
+
+    Verificado contra el ERP: con `FC - 22219` la OP se crea con 200 pero **no
+    queda aplicada** — Finnegans lo trata igual que a un documento inexistente.
+    La factura sigue con saldo y el control la volvería a ofrecer para pagar.
+    """
+
+    def test_factura_de_finnegans_manda_el_documento_de_siempre(self):
+        # IdentificacionExterna == DOCUMENTO: el valor no cambia respecto de antes.
+        pend = claves_pendientes([FILA_CLASICA])
+        assert aplicacion_para(pend, "FC - 22118", "A-0016-00030187") == "FC - 22118"
+
+    def test_factura_del_otro_sistema_manda_la_identificacion_externa(self):
+        pend = claves_pendientes([FILA_EXTERNA])
+        assert aplicacion_para(pend, "FC - 22219", "A-0002-00000196") == (
+            "20313144411-A-0002-00000196"
+        )
+
+    def test_resuelve_igual_entrando_por_el_comprobante(self):
+        pend = claves_pendientes([FILA_EXTERNA])
+        assert aplicacion_para(pend, "", "A-0002-00000196") == (
+            "20313144411-A-0002-00000196"
+        )
+
+    def test_sin_saldo_consultado_cae_al_documento(self):
+        # pendientes = None: la consulta falló. Se manda lo de antes y se avisa.
+        assert aplicacion_para(None, "FC - 22219", "A-0002-00000196") == "FC - 22219"
+
+    def test_documento_que_no_esta_en_el_indice_cae_al_documento(self):
+        pend = claves_pendientes([FILA_EXTERNA])
+        assert aplicacion_para(pend, "FC - 11111", "") == "FC - 11111"
+
+    def test_una_fila_sin_identificacion_externa_cae_al_documento(self):
+        fila = {**FILA_CLASICA, "IDENTIFICACIONEXTERNA": ""}
+        pend = claves_pendientes([fila])
+        assert aplicacion_para(pend, "FC - 22118", "") == "FC - 22118"

@@ -20,6 +20,11 @@ class ItemFactura:
     importe: Decimal
     fecha_vto: date | None
     modalidad_pago: str     # col L raw, ej "Ch 08/05 - 10/05"
+    # Con qué se aplica el pago en el POST. Lo completa _construir_ops con la
+    # IdentificacionExterna que devolvió composicionSaldoProveedor: mandar el
+    # documento interno hace que la OP se cree pero no quede aplicada. Vacío =
+    # no se pudo consultar el saldo, y se cae a `documento`.
+    aplicacion_origen: str = ""
 
 
 @dataclass

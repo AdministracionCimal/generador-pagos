@@ -103,26 +103,60 @@ def claves_de_fila(fila: dict) -> set[str]:
     }
 
 
-def claves_pendientes(filas: list[dict]) -> set[str]:
-    """Índice de lo que tiene saldo. Las filas en cero no entran: son las ya canceladas."""
-    claves: set[str] = set()
+def claves_pendientes(filas: list[dict]) -> dict[str, str]:
+    """`{clave normalizada: IdentificacionExterna}` de lo que tiene saldo.
+
+    Se guarda la identificación externa **tal cual la devuelve el ERP** porque es
+    la que hay que mandar en `AplicacionOrigen`: ver `aplicacion_para()`. Las
+    filas en cero no entran: son las ya canceladas.
+    """
+    indice: dict[str, str] = {}
     for fila in filas:
         try:
             importe = float(fila.get("IMPORTEMONTRAN", 0) or 0)
         except (TypeError, ValueError):
             importe = 0.0
-        if importe != 0:
-            claves |= claves_de_fila(fila)
+        if importe == 0:
+            continue
+        externa = str(fila.get("IDENTIFICACIONEXTERNA") or "").strip()
+        for clave in claves_de_fila(fila):
+            indice.setdefault(clave, externa)
+    return indice
+
+
+def _candidatos(documento: str, comprobante: str = "") -> set[str]:
+    """Las dos columnas del Excel, normalizadas, para buscar en el índice."""
+    claves = {normalizar(documento)}
+    if comprobante:
+        claves.add(normalizar(comprobante))
     return claves
 
 
-def figura_con_saldo(pendientes: set[str], documento: str, comprobante: str = "") -> bool:
+def figura_con_saldo(pendientes, documento: str, comprobante: str = "") -> bool:
     """True si el ítem del Excel se corresponde con alguna fila con saldo.
 
     Se prueban las dos columnas que trae el Excel («Documento» y «Comprobante»)
     porque cuál de las dos coincide depende de quién cargó la factura.
     """
-    candidatos = {normalizar(documento)}
-    if comprobante:
-        candidatos.add(normalizar(comprobante))
-    return bool(candidatos & pendientes)
+    return any(clave in pendientes for clave in _candidatos(documento, comprobante))
+
+
+def aplicacion_para(pendientes, documento: str, comprobante: str = "") -> str:
+    """Identificador con el que Finnegans aplica el pago a la factura.
+
+    `AplicacionOrigen` resuelve por `IdentificacionExterna`, **no** por el
+    documento interno. Verificado contra el ERP: con `FC - 22219` la OP se crea
+    con status 200 pero **no queda aplicada** — Finnegans lo trata igual que a un
+    documento inexistente, y la factura sigue mostrando saldo (con lo cual el
+    control de saldos la volvería a ofrecer para pagar).
+
+    Para lo que carga Finnegans la identificación externa es el propio
+    `FC - 21562`, así que el valor no cambia. Si no se pudo consultar el saldo,
+    se cae al documento: es lo que se mandaba antes.
+    """
+    if isinstance(pendientes, dict):
+        for clave in _candidatos(documento, comprobante):
+            externa = pendientes.get(clave)
+            if externa:
+                return externa
+    return documento

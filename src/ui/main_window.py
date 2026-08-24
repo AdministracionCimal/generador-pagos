@@ -27,6 +27,7 @@ from src.domain.clasificador import clasificar
 from src.domain.documento import (
     es_fc,
     es_pago,
+    aplicacion_para,
     claves_pendientes,
     figura_con_saldo,
     id_externa,
@@ -1623,8 +1624,16 @@ class MainWindow(QMainWindow):
                     if not figura_con_saldo(pendientes, i.documento, i.comprobante)
                     and not es_pago(i.documento)
                 ]
+                # Se anota con qué aplicar cada ítem: el POST necesita la
+                # IdentificacionExterna, no el documento interno.
                 items_base = [
-                    i for i in p.items
+                    _dc_replace(
+                        i,
+                        aplicacion_origen=aplicacion_para(
+                            pendientes, i.documento, i.comprobante
+                        ),
+                    )
+                    for i in p.items
                     if figura_con_saldo(pendientes, i.documento, i.comprobante)
                     or es_pago(i.documento)
                 ]
@@ -1634,8 +1643,7 @@ class MainWindow(QMainWindow):
                     )
                 if not items_base:
                     continue
-                if len(items_base) < len(p.items):
-                    p = _dc_replace(p, items=items_base)
+                p = _dc_replace(p, items=items_base)
 
             # A1: CUIT debe ser 11 dígitos numéricos
             if not p.cuit or not (p.cuit.isdigit() and len(p.cuit) == 11):

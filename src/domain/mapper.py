@@ -83,7 +83,7 @@ def _item_a_ctacte(item, cuenta_proveedor: str) -> dict:
         "MonedaCodigo": MONEDA_PES,
         "ImporteMonPrincipal": float(abs(item.importe)),
         "Descripcion": item.comprobante,
-        "AplicacionOrigen": item.documento,
+        "AplicacionOrigen": getattr(item, "aplicacion_origen", "") or item.documento,
         "DimensionDistribucion": [],
     }
 
