@@ -23,14 +23,27 @@ class CarteraError(Exception):
     pass
 
 
+# El reporte cambió el formato de fecha sin aviso: hasta 2026-08 devolvía
+# `dd-mm-yyyy` y ahora manda ISO `yyyy-mm-dd`. Se aceptan los dos para no volver
+# a perder las fechas si Finnegans lo revierte.
+_FORMATOS_FECHA = ("%Y-%m-%d", "%d-%m-%Y")
+
+
 def _fecha(crudo) -> date | None:
-    """El reporte devuelve `dd-mm-yyyy`."""
-    if not crudo:
+    """Fecha del reporte, venga en ISO (`yyyy-mm-dd`) o en `dd-mm-yyyy`.
+
+    Devolver `None` acá no es inocuo: la fecha termina vacía en el POST del
+    endoso, así que conviene sumar formatos antes que dejar que falle en silencio.
+    """
+    texto = str(crudo or "").strip()
+    if not texto:
         return None
-    try:
-        return datetime.strptime(str(crudo).strip(), "%d-%m-%Y").date()
-    except ValueError:
-        return None
+    for formato in _FORMATOS_FECHA:
+        try:
+            return datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _importe(crudo) -> Decimal:

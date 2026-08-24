@@ -58,6 +58,26 @@ class TestLeerCartera:
         assert cheque.fecha_emision == date(2026, 1, 2)
         assert cheque.fecha_vencimiento == date(2026, 3, 3)
 
+    def test_parsea_las_fechas_en_formato_iso(self):
+        """Desde agosto 2026 el reporte manda `yyyy-mm-dd` en vez de `dd-mm-yyyy`.
+
+        Si se pierden, el endoso viaja al POST con las fechas vacías.
+        """
+        cheque = leer_cartera([
+            _fila(FECHAEMISION="2026-08-07", FECHAVENCIMIENTO="2026-09-13")
+        ])[0]
+        assert cheque.fecha_emision == date(2026, 8, 7)
+        assert cheque.fecha_vencimiento == date(2026, 9, 13)
+
+    def test_los_dos_formatos_conviven_en_la_misma_respuesta(self):
+        cheques = leer_cartera([
+            _fila(DOCUMENTOFISICOID=1, FECHAVENCIMIENTO="2026-09-13"),
+            _fila(DOCUMENTOFISICOID=2, FECHAVENCIMIENTO="13-09-2026"),
+        ])
+        assert [c.fecha_vencimiento for c in cheques] == [
+            date(2026, 9, 13), date(2026, 9, 13)
+        ]
+
     def test_fecha_invalida_queda_en_none(self):
         cheque = leer_cartera([_fila(FECHAVENCIMIENTO="")])[0]
         assert cheque.fecha_vencimiento is None
