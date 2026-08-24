@@ -111,9 +111,6 @@ class FinnegansClient:
     def crear_op(self, payload: dict) -> dict:
         return self.post(self.endpoints.operacion_tesoreria_save(), payload)
 
-    def get_organizacion(self, cuit: str) -> dict:
-        return self.get(self.endpoints.organizacion_get(cuit))
-
     def get_proveedor(self, cuit: str) -> dict:
         if self._token is None or time.time() >= self._token_expires_at:
             self._fetch_token()
@@ -162,18 +159,6 @@ class FinnegansClient:
         data = self._parse_response(resp)
         return data if isinstance(data, list) else []
 
-    def get_aplicacion_factura_compra(self, comprobante: str) -> list[dict]:
-        if self._token is None or time.time() >= self._token_expires_at:
-            self._fetch_token()
-        resp = httpx.get(
-            self.endpoints.aplicacion_factura_compra(comprobante, self._token),
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            raise ApiError(resp.status_code, resp.text[:200])
-        data = self._parse_response(resp)
-        return data if isinstance(data, list) else []
-
     def get_factura_compra(self, documento: str) -> dict:
         if self._token is None or time.time() >= self._token_expires_at:
             self._fetch_token()
@@ -198,14 +183,6 @@ class FinnegansClient:
                 if isinstance(data, list) and data:
                     return float(data[0].get("COTIZACION", 1))
         return 1.0
-
-    def get_cuenta(self, codigo: str) -> dict:
-        if self._token is None or time.time() >= self._token_expires_at:
-            self._fetch_token()
-        resp = httpx.get(self.endpoints.cuenta(codigo, self._token), timeout=15)
-        if resp.status_code != 200:
-            raise ApiError(resp.status_code, resp.text[:200])
-        return self._parse_response(resp)
 
     def get_talonario_list(self) -> list[dict]:
         if self._token is None or time.time() >= self._token_expires_at:

@@ -8,9 +8,6 @@ class Endpoints:
     def operacion_tesoreria_save(self) -> str:
         return f"{self.base}/ordenPago"
 
-    def organizacion_get(self, codigo: str) -> str:
-        return f"{self.base}/Organizacion/get?codigo={codigo}"
-
     def proveedor(self, cuit: str, token: str) -> str:
         return f"{self.base}/proveedor/{cuit}?ACCESS_TOKEN={token}"
 
@@ -24,10 +21,6 @@ class Endpoints:
     def talonario(self, codigo: str, token: str) -> str:
         from urllib.parse import quote
         return f"{self.base}/Talonario/{quote(codigo, safe='')}?ACCESS_TOKEN={token}"
-
-    def cuenta(self, codigo: str, token: str) -> str:
-        from urllib.parse import quote
-        return f"{self.base}/cuenta/{quote(codigo, safe='')}?ACCESS_TOKEN={token}"
 
     def talonario_list(self, token: str) -> str:
         return f"{self.base}/Talonario/list?ACCESS_TOKEN={token}"
@@ -71,14 +64,6 @@ class Endpoints:
             f"&PARAMWEBREPORT_FechaDesde={fecha}"
             f"&PARAMWEBREPORT_FechaHasta={fecha}"
             f"&PARAMWEBREPORT_Moneda={moneda}"
-        )
-
-    def aplicacion_factura_compra(self, comprobante: str, token: str) -> str:
-        from urllib.parse import quote
-        return (
-            f"{self.base}/reports/aplicacionFacturaCompra"
-            f"?ACCESS_TOKEN={token}"
-            f"&NumeroDocumento={quote(comprobante, safe='')}"
         )
 
     def situacion_cheques(
