@@ -11,6 +11,7 @@ from src.domain.models import ItemFactura, OpPago, ProveedorTanda
 from src.ui.main_window import (
     _ProcesarWorker,
     componer_avisos,
+    erp_informo_ultimo_cheque,
     numero_cheque_desfasado,
     proveedores_pendientes,
 )
@@ -165,3 +166,33 @@ class TestComponerAvisos:
     def test_dice_que_se_paga_segun_el_excel(self):
         _, cuerpo = componer_avisos([], ["ACME SA"])
         assert "Excel" in cuerpo
+
+
+class TestErpInformoUltimoCheque:
+    """`numero_cheque_desfasado()` devuelve None si coinciden Y si no hay dato.
+
+    Confundir los dos casos hacía que, ante un fallo al leer el talonario, la
+    protección contra números de cheque repetidos se cayera en silencio.
+    """
+
+    def test_numero_valido(self):
+        assert erp_informo_ultimo_cheque("73190500")
+
+    def test_con_espacios(self):
+        assert erp_informo_ultimo_cheque("  73190500 ")
+
+    def test_vacio_es_falta_de_dato(self):
+        assert not erp_informo_ultimo_cheque("")
+
+    def test_none_es_falta_de_dato(self):
+        assert not erp_informo_ultimo_cheque(None)
+
+    def test_texto_no_numerico_es_falta_de_dato(self):
+        assert not erp_informo_ultimo_cheque("s/d")
+
+    def test_no_se_confunde_con_coincidencia(self):
+        # Los dos dan None en numero_cheque_desfasado, pero sólo uno es un fallo.
+        assert numero_cheque_desfasado("500", 500) is None
+        assert numero_cheque_desfasado("", 500) is None
+        assert erp_informo_ultimo_cheque("500")
+        assert not erp_informo_ultimo_cheque("")

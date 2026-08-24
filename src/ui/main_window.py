@@ -117,12 +117,31 @@ def proveedores_pendientes(proveedores: list, ops: list, resultados: list) -> li
 
 def numero_cheque_desfasado(ultimo_erp: str, ultimo_app: int) -> int | None:
     """Último número de cheque que informa Finnegans cuando difiere del cargado
-    en la app; None si coinciden o si el dato del ERP no es utilizable."""
+    en la app; None si coinciden o si el dato del ERP no es utilizable.
+
+    Ojo con ese «o»: los dos casos devuelven None y **no significan lo mismo**.
+    Para distinguirlos está `erp_informo_ultimo_cheque()`.
+    """
     try:
         numero_erp = int(str(ultimo_erp).strip())
     except (TypeError, ValueError):
         return None
     return numero_erp if numero_erp != ultimo_app else None
+
+
+def erp_informo_ultimo_cheque(ultimo_erp: str) -> bool:
+    """False si la consulta al talonario no devolvió un número usable.
+
+    Sin ese dato no se puede detectar que otra persona haya emitido con la misma
+    chequera, y se emitirían cheques con números repetidos. Como
+    `numero_cheque_desfasado()` devuelve None tanto si coinciden como si no hay
+    dato, sin esta distinción la protección se caía sin que nadie se enterara.
+    """
+    try:
+        int(str(ultimo_erp).strip())
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 _ESTADOS = {
@@ -1491,6 +1510,23 @@ class MainWindow(QMainWindow):
         app, hay que decidir: dos personas emitiendo con la misma chequera
         generarían cheques con números repetidos.
         """
+        if not erp_informo_ultimo_cheque(ultimo_cheque_erp):
+            # La consulta al talonario falló. Se puede seguir, pero sin la
+            # verificación: es lo mismo que hacía antes, sólo que ahora se dice.
+            reply = QMessageBox.warning(
+                self,
+                "No se pudo verificar el último cheque",
+                "No se pudo leer el talonario en Finnegans, así que no se puede "
+                "confirmar cuál fue el último cheque emitido."
+                "<br><br>Si otra persona emitió con esta chequera, se generarían "
+                "cheques con <b>números repetidos</b>."
+                f"<br><br>Se emitiría desde <b>{self._ultimo_cheque + 1}</b>. "
+                "¿Continuar igual?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            return reply == QMessageBox.StandardButton.Yes
+
         numero_erp = numero_cheque_desfasado(ultimo_cheque_erp, self._ultimo_cheque)
         if numero_erp is None:
             return True
