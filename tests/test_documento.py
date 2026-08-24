@@ -48,7 +48,12 @@ class TestTipoDeDocumento:
 
 # ── cruce contra composicionSaldoProveedor ────────────────────────────────────
 
-from src.domain.documento import claves_de_fila, claves_pendientes, figura_con_saldo
+from src.domain.documento import (
+    claves_de_fila,
+    claves_pendientes,
+    figura_con_saldo,
+    id_externa,
+)
 
 # Fila real: factura cargada por Finnegans (IDENTIFICACIONEXTERNA == DOCUMENTO).
 FILA_CLASICA = {
@@ -168,4 +173,34 @@ class TestIdentificacionExternaConCuit:
         }
         assert figura_con_saldo(
             claves_pendientes([fila]), "20-31314441-1-A-0002-00000196"
+        )
+
+
+class TestIdExterna:
+    """`/facturaCompra/{clave}` resuelve por IdentificacionExterna.
+
+    Con el documento interno devuelve 404 para lo que carga el otro sistema, y
+    sin ratio se asume 100% gravado: la retención sale de más y al proveedor se
+    le paga de menos.
+    """
+
+    def test_arma_la_clave(self):
+        assert id_externa("20313144411", "A-0002-00000196") == "20313144411-A-0002-00000196"
+
+    def test_limpia_la_puntuacion_del_cuit(self):
+        assert id_externa("20-31314441-1", "A-0002-00000196") == "20313144411-A-0002-00000196"
+
+    def test_normaliza_el_comprobante(self):
+        assert id_externa("20313144411", "  a-0002-00000196 ") == "20313144411-A-0002-00000196"
+
+    def test_sin_comprobante_no_arma_nada(self):
+        assert id_externa("20313144411", "") == ""
+
+    def test_sin_cuit_no_arma_nada(self):
+        assert id_externa("", "A-0002-00000196") == ""
+
+    def test_lo_que_arma_es_lo_que_normalizar_canoniza(self):
+        # Las dos puntas tienen que coincidir o el cruce de saldos no cierra.
+        assert normalizar(id_externa("20-31314441-1", "A-0002-00000196")) == (
+            "20313144411-A-0002-00000196"
         )

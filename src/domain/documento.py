@@ -62,6 +62,22 @@ def es_pago(documento: str) -> bool:
     return tiene_prefijo(documento, "PAGO")
 
 
+def id_externa(cuit: str, comprobante: str) -> str:
+    """Reconstruye la `IdentificacionExterna` que graba el sistema de carga.
+
+    `GET /facturaCompra/{clave}` resuelve por ese campo, **no** por el documento
+    interno. Para lo que carga Finnegans los dos coinciden y no se nota; para lo
+    que carga el otro sistema, `FC - 22219` devuelve 404 y hay que armar
+    `<CUIT>-<comprobante>`. Sin eso el ratio gravado/total queda sin resolver, se
+    asume 100% gravado y la retención sale de más.
+    """
+    digitos = re.sub(r"[^0-9]", "", str(cuit or ""))
+    comp = " ".join(str(comprobante or "").split()).upper()
+    if not digitos or not comp:
+        return ""
+    return f"{digitos}-{comp}"
+
+
 # ── cruce contra composicionSaldoProveedor ────────────────────────────────────
 #
 # El reporte identifica la misma factura de tres formas y **no son intercambiables**:

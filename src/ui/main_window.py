@@ -29,6 +29,7 @@ from src.domain.documento import (
     es_pago,
     claves_pendientes,
     figura_con_saldo,
+    id_externa,
 )
 from src.domain.empresa import codigo_limpio as empresa_codigo_limpio
 from src.domain.forma_pago import (
@@ -365,27 +366,38 @@ class _PrecargarWorker(QThread):
 
                 if tiene_retencion:
                     docs_to_fetch = []
+                    vistos: set = set()
                     for item in p.items:
                         doc = item.documento
-                        if not es_fc(doc):
+                        if not es_fc(doc) or doc in vistos:
                             continue
                         with lock:
                             already_ratio = doc in ratios_fc
                         if not already_ratio:
-                            docs_to_fetch.append(doc)
-                    for doc in docs_to_fetch:
+                            vistos.add(doc)
+                            docs_to_fetch.append((doc, item.comprobante))
+                    for doc, comprobante in docs_to_fetch:
                         try:
-                            fc      = client.get_factura_compra(doc)
+                            fc      = client.get_factura_compra(
+                                doc, id_externa(p.cuit, comprobante)
+                            )
                             gravado = sum(
                                 Decimal(str(c.get("ConceptoImporteGravado", 0)))
                                 for c in fc.get("Conceptos", [])
                             )
                             total_fc = Decimal(str(fc.get("ImporteTotalControl", 0)))
-                            if total_fc > 0:
-                                with lock:
-                                    ratios_fc.setdefault(doc, gravado / total_fc)
-                        except Exception:
-                            pass
+                            if total_fc <= 0:
+                                raise ValueError("ImporteTotalControl en cero")
+                            with lock:
+                                ratios_fc.setdefault(doc, gravado / total_fc)
+                        except Exception as exc:
+                            # Sin ratio se asume 100% gravado y la retención sale
+                            # de más: se le paga menos al proveedor. No es inocuo.
+                            _LOG.warning("facturaCompra %s falló: %s", doc, exc)
+                            avisos.append(
+                                f"⚠ {p.nombre}: no se pudo leer {doc} para la "
+                                f"retención — se toma 100% gravado y puede quedar alta"
+                            )
             except Exception as exc:
                 _LOG.warning("Precarga falló para %s: %s", p.cuit, exc)
                 avisos.append(f"⚠ {p.nombre}: error al precargar datos ({exc})")

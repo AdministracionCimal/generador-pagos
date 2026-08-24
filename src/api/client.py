@@ -159,13 +159,27 @@ class FinnegansClient:
         data = self._parse_response(resp)
         return data if isinstance(data, list) else []
 
-    def get_factura_compra(self, documento: str) -> dict:
+    def get_factura_compra(self, documento: str, clave_alterna: str = "") -> dict:
+        """La FC se busca por `IdentificacionExterna`, no por el documento interno.
+
+        Coinciden en lo que carga Finnegans, así que con `documento` alcanza casi
+        siempre. Lo que carga otro sistema trae `<CUIT>-<comprobante>` ahí y
+        responde 404 al documento: para esos se pasa `clave_alterna`.
+        """
         if self._token is None or time.time() >= self._token_expires_at:
             self._fetch_token()
-        resp = httpx.get(self.endpoints.factura_compra(documento, self._token), timeout=15)
-        if resp.status_code != 200:
-            raise ApiError(resp.status_code, resp.text[:200])
-        return self._parse_response(resp)
+        claves = [documento]
+        if clave_alterna and clave_alterna != documento:
+            claves.append(clave_alterna)
+        error: ApiError | None = None
+        for clave in claves:
+            resp = httpx.get(self.endpoints.factura_compra(clave, self._token), timeout=15)
+            if resp.status_code == 200:
+                return self._parse_response(resp)
+            error = ApiError(resp.status_code, resp.text[:200])
+            if resp.status_code != 404:
+                break   # 500/403 no se arreglan probando otra clave
+        raise error
 
     def get_cotizacion_dolar(self, fecha: str) -> float:
         """Devuelve la cotización DOL para la fecha dada (yyyy-MM-dd).
