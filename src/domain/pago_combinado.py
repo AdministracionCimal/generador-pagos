@@ -221,6 +221,22 @@ def _a_endosado(numero: str, cheques_cartera: list, mapa_bancos: dict[str, str])
     if cheque is None:                        # repartir() ya lo habría rechazado
         raise RepartoError(f"no se encontró en cartera el cheque {numero}")
 
+    # Sin fechas el POST viaja con `FechaDocumentoFisico: ""` y Finnegans lo
+    # acepta igual: el endoso queda cargado sin fechas y nadie se entera. Pasó
+    # una vez cuando el reporte de cartera cambió de formato sin aviso, así que
+    # antes que endosar a ciegas, carga manual.
+    faltantes = [
+        etiqueta
+        for etiqueta, valor in (("emisión", cheque.fecha_emision),
+                                ("vencimiento", cheque.fecha_vencimiento))
+        if valor is None
+    ]
+    if faltantes:
+        raise RepartoError(
+            f"el cheque {cheque.numero} en cartera vino sin fecha de "
+            f"{' ni de '.join(faltantes)} (¿cambió el formato del reporte?)"
+        )
+
     banco_codigo = resolver_codigo(mapa_bancos, cheque.banco)
     if not banco_codigo:
         raise RepartoError(

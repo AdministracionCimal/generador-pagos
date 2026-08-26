@@ -5,7 +5,7 @@ reescribe el CI antes de compilar (ver `.github/workflows/release.yml`), así qu
 en el repo quedan vacíos: un build local es "dev" y no chequea actualizaciones.
 """
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 BUILD_SHA = ""      # commit del que salió este .exe
 BUILD_DATE = ""     # ISO-8601 UTC de la compilación
 

@@ -1,6 +1,6 @@
 [project]
 name = "generador-de-pagos"
-version = "1.0.0"   # la fuente de verdad para la UI es src/version.py
+version = "1.1.1"   # la fuente de verdad para la UI es src/version.py
 description = "App de escritorio para generar Ordenes de Pago en Finnegans desde planilla DM"
 requires-python = ">=3.11"
 dependencies = [

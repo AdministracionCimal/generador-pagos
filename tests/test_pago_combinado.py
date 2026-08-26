@@ -292,6 +292,28 @@ class TestCasosQueVanAManual:
                   self._cartera("12345", "400000"), mapa_bancos={}, numero_desde=1,
                   fecha_emision=HOY)
 
+    @pytest.mark.parametrize("emision, vencimiento", [
+        ("", "01-09-2026"),            # falta la fecha de emisión
+        ("01-07-2026", ""),            # falta el vencimiento
+        ("2026/07/01", "2026/09/01"),  # formato desconocido: _fecha() da None
+    ])
+    def test_endoso_sin_fechas_va_a_carga_manual(self, emision, vencimiento):
+        """Antes que endosar con las fechas vacías en el POST, carga manual.
+
+        Finnegans acepta `FechaDocumentoFisico: ""` sin chistar, así que si el
+        reporte de cartera vuelve a cambiar de formato el fallo sería mudo.
+        """
+        cartera = leer_cartera([{
+            "DOCUMENTOFISICOID": 1, "NUMERO": "12345", "NROCHEQUEELECTRONICO": "12345",
+            "BANCO": "BANCO MACRO S.A.", "TERCERO": "X", "CUITLIBRADOR": "30-1-7",
+            "FECHAEMISION": emision, "FECHAVENCIMIENTO": vencimiento,
+            "IMPORTEMONTRANSACCION": "1000000", "EMPRESA": "CIMALCO NEUQUEN S.A.",
+        }])
+        proveedor = self._proveedor("Endoso 12345", "1000000")
+        with pytest.raises(RepartoError, match="sin fecha de"):
+            armar(proveedor, proveedor.tramos, Decimal("0"),
+                  cartera, MAPA_BANCOS, 1, HOY)
+
     def test_el_vencimiento_pasado_del_endoso_no_molesta(self):
         """Un cheque de cartera vencido se puede endosar: no es error."""
         cartera = leer_cartera([{

@@ -32,8 +32,8 @@ _FORMATOS_FECHA = ("%Y-%m-%d", "%d-%m-%Y")
 def _fecha(crudo) -> date | None:
     """Fecha del reporte, venga en ISO (`yyyy-mm-dd`) o en `dd-mm-yyyy`.
 
-    Devolver `None` acá no es inocuo: la fecha termina vacía en el POST del
-    endoso, así que conviene sumar formatos antes que dejar que falle en silencio.
+    Devolver `None` manda el endoso a carga manual (`_a_endosado()` lo rechaza),
+    así que ante un formato nuevo conviene sumarlo acá antes que resignar el pago.
     """
     texto = str(crudo or "").strip()
     if not texto:
